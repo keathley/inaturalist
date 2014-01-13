@@ -11,11 +11,11 @@
     <title><%= CONFIG.site_name %> &middot; <%= yield :title %></title>
     <link rel="icon" type="image/png" href="/images/favicon.png"/>
     <%= render :partial => 'shared/common_stylesheets'%>
-    <%= javascript_include_tag 'jquery/jquery-1.8.3.min', 
-                               'jquery/jquery-ui-1.9.1.min', 
+    <%= javascript_include_tag 'jquery/jquery-1.8.3.min',
+                               'jquery/jquery-ui-1.9.1.min',
                                "iso8601",
-                               "jquery/plugins/jquery.qtip2.min", 
-                               "jquery/plugins/jquery.multiselect.min", 
+                               "jquery/plugins/jquery.qtip2.min",
+                               "jquery/plugins/jquery.multiselect.min",
                                "jquery/plugins/jquery.ui.autocomplete.html",
                                "jquery/plugins/jquery.chooser",
                                "jquery/plugins/jquery-ui-timepicker-addon",
@@ -26,7 +26,7 @@
                                "i18n.min",
                                "translations",
                                'rails',
-                               'application', 
+                               'application',
                                'inaturalist' %>
     <script type="text/javascript">
       I18n.defaultLocale = "en"
@@ -39,7 +39,9 @@
       <meta name="twitter:site" content="<%= CONFIG.twitter.username %>">
     <% end -%>
     <meta property="og:site_name" content="<%= CONFIG.site_name %>"/>
-    <meta property="fb:app_id" content="<%= CONFIG.facebook['app_id'] %>" />
+    <% if CONFIG.facebook && CONFIG.facebook.app_id %>
+      <meta property="fb:app_id" content="<%= CONFIG.facebook['app_id'] %>" />
+    <% end %>
     <%= yield :extrahead %>
     <%= yield :extracss %>
     <%= yield :extrajs %>
@@ -50,24 +52,24 @@
       <%= render :partial => 'shared/header' %>
     <% end %>
   <% end -%>
-  
+
   <% if flash[:notice] || flash[:alert] %>
-  <p id="flash" class="notice"><%= (flash[:notice] || flash[:alert]).html_safe %></p> 
+  <p id="flash" class="notice"><%= (flash[:notice] || flash[:alert]).html_safe %></p>
   <% end %>
-  
+
   <% if flash[:error] %>
-  <p id="flash" class="error"><%= flash[:error] %></p> 
+  <p id="flash" class="error"><%= flash[:error] %></p>
   <% end %>
 
   <div id="wrapper" class="container clear">
     <%= yield %>
   </div><!-- end wrapper -->
-  
+
   <div id="modal_image_box" class="modalbox" style="display:none"></div>
   <div id="comment_preview" class="modalbox" style="display: none"></div>
 
   <%= render :partial => 'shared/footer' unless @footless %>
-  
+
   <% if logged_in? -%>
     <script type="text/javascript" charset="utf-8">
       setUpdatesCount(<%= session[:updates_count].to_i %>)
