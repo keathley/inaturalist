@@ -8,7 +8,7 @@ class ListsController < ApplicationController
   before_filter :owner_required, :only => [:edit, :update, :destroy, 
     :remove_taxon, :reload_from_observations]
   before_filter :require_listed_taxa_editor, :only => [:add_taxon_batch, :batch_edit]
-  before_filter :load_find_options, :only => [:show]
+  before_filter :set_find_options, :only => [:show]
   before_filter :load_user_by_login, :only => :by_login
   
   caches_page :show, :if => Proc.new {|c| c.request.format == :csv}
@@ -246,7 +246,6 @@ class ListsController < ApplicationController
   def delayed_task(cache_key)
     @job_id = Rails.cache.read(cache_key)
     @job = Delayed::Job.find_by_id(@job_id) if @job_id && @job_id.is_a?(Fixnum)
-    Rails.logger.debug "[DEBUG] @job: #{@job}"
     @tries = params[:tries].to_i
     @start = @tries == 0 && @job.blank?
     @done = @tries > 0 && @job.blank?

@@ -15,6 +15,7 @@ module Shared::ListsModule
   
   def show
     @view = params[:view] || params[:view_type]
+    @unpaginated_listed_taxa ||= ListedTaxon.filter_by_list(@list.id)
     respond_to do |format|
       format.html do
         # Make sure request is being handled by the right controller
@@ -28,15 +29,13 @@ module Shared::ListsModule
             @find_options[:conditions], ["AND listed_taxa.taxon_id IN (?)", @search_taxon_ids])
         end
 
-        @listed_taxa ||= @list.listed_taxa.paginate(@find_options)
+        set_scopes unless @listed_taxa.present?
 
-        @taxon_names_by_taxon_id = TaxonName.all(:conditions => [
-          "taxon_id IN (?)", [@listed_taxa.map(&:taxon), @taxa, @iconic_taxa].flatten.compact
-        ]).group_by(&:taxon_id)
+        @taxon_names_by_taxon_id = set_taxon_names_by_taxon_id
 
-        @iconic_taxon_counts = get_iconic_taxon_counts(@list, @iconic_taxa)
-        @total_listed_taxa ||= @list.listed_taxa.count
-        @total_observed_taxa ||= @list.listed_taxa.count(:conditions => "last_observation_id IS NOT NULL")
+        @iconic_taxon_counts = get_iconic_taxon_counts(@list, @iconic_taxa, @unpaginated_listed_taxa)
+        @total_listed_taxa ||= @listed_taxa.count 
+        @total_observed_taxa ||= @listed_taxa.with_observation.count
         @view = PHOTO_VIEW unless LIST_VIEWS.include?(@view)
 
         case @view
@@ -112,6 +111,7 @@ module Shared::ListsModule
       
       format.json do
         @find_options[:order] = "observations_count DESC" if params[:order_by].blank?
+        set_scopes unless @listed_taxa.present?
         @listed_taxa ||= @list.listed_taxa.paginate(@find_options)
         render :json => {
           :list => @list,
@@ -156,12 +156,12 @@ module Shared::ListsModule
           end
           lt ||= ListedTaxon.new(:list => @list)
           lt.description = description unless description.blank?
-          lt.occurrence_status_level = if ListedTaxon::OCCURRENCE_STATUS_LEVELS_BY_NAME[occurrence_status.to_s.downcase]
-            ListedTaxon::OCCURRENCE_STATUS_LEVELS_BY_NAME[occurrence_status.to_s.downcase]
+          lt.occurrence_status_level = if ListedTaxon::OCCURRENCE_STATUS_LEVELS_BY_NAME[primary_occurrence_status.to_s.downcase]
+            ListedTaxon::OCCURRENCE_STATUS_LEVELS_BY_NAME[primary_occurrence_status.to_s.downcase]
           else
             lt.occurrence_status_level
           end
-          lt.establishment_means = if ListedTaxon::ESTABLISHMENT_MEANS.include?(establishment_means.to_s.downcase)
+          lt.establishment_means = if ListedTaxon::ESTABLISHMENT_MEANS.include?(primary_establishment_means.to_s.downcase)
             establishment_means.downcase
           else
             lt.establishment_means
@@ -329,20 +329,16 @@ module Shared::ListsModule
   
   private
   
-  def get_iconic_taxon_counts(list, iconic_taxa = nil)
-    iconic_taxa ||= Taxon.iconic_taxa
-    # TODO: pull out check list logic
-    iconic_taxon_counts_by_id_hash = if list.is_a?(CheckList) && list.is_default?
-      ListedTaxon.count(:all, :include => [:taxon], 
-        :conditions => ["place_id = ?", list.place_id],
-        :group => "taxa.iconic_taxon_id")
-    else
-      list.listed_taxa.count(:all, :include => [:taxon], :group => "taxa.iconic_taxon_id")
-    end
+  def get_iconic_taxon_counts(list, iconic_taxa = nil, listed_taxa = nil)
+    iconic_taxa ||= Taxon::ICONIC_TAXA
+    listed_taxa ||= @listed_taxa
+    listed_taxa_iconic_taxon_ids = listed_taxa.map{|lt| lt.taxon.iconic_taxon_id }
     iconic_taxa.map do |iconic_taxon|
-      [iconic_taxon, iconic_taxon_counts_by_id_hash[iconic_taxon.id.to_s]]
+      taxon_count = listed_taxa_iconic_taxon_ids.count(iconic_taxon.id)
+      [iconic_taxon, taxon_count]
     end
   end
+
   
   def load_list
     @list = List.find_by_id(params[:id].to_i)
@@ -363,7 +359,7 @@ module Shared::ListsModule
     list
   end
   
-  def load_find_options
+  def set_find_options
     @iconic_taxa = Taxon::ICONIC_TAXA
     @iconic_taxa_by_id = @iconic_taxa.index_by(&:id)
     page = params[:page].to_i
@@ -379,39 +375,85 @@ module Shared::ListsModule
         {:taxon => [:iconic_taxon, :photos, :taxon_names]}
       ]
     }
-    if params[:taxon] && @filter_taxon = (Taxon.find_by_id(params[:taxon].to_i) || Taxon.where("lower(name) = ?", params[:taxon].to_s.downcase).first)
-      self_and_ancestor_ids = [@filter_taxon.ancestor_ids, @filter_taxon.id].flatten.join('/')
-      @find_options[:conditions] = [
-        "(listed_taxa.taxon_id = ? OR taxon_ancestor_ids = ? OR taxon_ancestor_ids LIKE ?)", 
-        @filter_taxon.id, self_and_ancestor_ids, "#{self_and_ancestor_ids}/%"
-      ]
-      
-      # The above condition on a joined table will trigger an eager load, 
-      # which won't load all 2nd order associations (e.g. taxon names), so 
-      # they'll have to loaded when needed
+    set_options_order
+  end
+
+  def set_scopes
+    apply_list_scopes
+    apply_checklist_scopes if @list.is_a?(CheckList)
+    @listed_taxa ||= @unpaginated_listed_taxa.paginate(@find_options)
+  end
+
+  def apply_list_scopes
+    if filter_by_taxon?
+      # This scope uses an eager load which won't load all 2nd order associations (e.g. taxon names), so they'll have to loaded when needed
       @find_options[:include] = [
         :last_observation, 
         {:taxon => [:iconic_taxon, :photos]}
       ]
-    elsif params[:iconic_taxon]
-      @filter_taxon = Taxon.find_by_id(params[:iconic_taxon])
-      @find_options[:conditions] = ["taxa.iconic_taxon_id = ?", @filter_taxon.try(:id)]
+      self_and_ancestor_ids = [@filter_taxon.ancestor_ids, @filter_taxon.id].flatten.join('/')
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.filter_by_taxon(@filter_taxon.id, self_and_ancestor_ids)
     end
-    if [true, 't', 'true', '1', 'y', 'yes'].include?(params[:observed])
+    if filter_by_iconic_taxon?
+      iconic_taxon_id = Taxon.find_by_id(params[:iconic_taxon]).try(:id)
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.filter_by_iconic_taxon(iconic_taxon_id)
+    end
+  end
+
+  def apply_checklist_scopes
+    if filter_by_param?(params[:taxonomic_status])
+      @taxonomic_status = params[:taxonomic_status]
+      unless @taxonomic_status=="all"
+        taxonomic_status_for_scope = params["taxonomic_status"] == "active"
+        @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_taxonomic_status(taxonomic_status_for_scope)
+      end
+    else
+      @taxonomic_status = "active"
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_taxonomic_status(true)
+    end
+    if with_observations?
       @observed = 't'
-      if @find_options[:conditions].blank?
-        @find_options[:conditions] = ["last_observation_id IS NOT NULL"]
-      else
-        @find_options[:conditions][0] += " AND last_observation_id IS NOT NULL"
-      end
-    elsif [false, 'f', 'false', '0', 'n', 'no'].include?(params[:observed])
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.confirmed
+    elsif with_no_observations?
       @observed = 'f'
-      if @find_options[:conditions].blank?
-        @find_options[:conditions] = ["last_observation_id IS NULL"]
-      else
-        @find_options[:conditions][0] += " AND last_observation_id IS NULL"
-      end
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.unconfirmed
     end
+    if filter_by_param?(params[:rank])
+      @rank = params[:rank]
+      if @rank=="species"
+        @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_species
+      elsif @rank=="leaves"
+        @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_leaves(@unpaginated_listed_taxa.to_sql)
+      end
+    else 
+      @rank = "species"
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_species
+    end
+    if filter_by_param?(params[:establishment_means])
+      @establishment_means = params[:establishment_means]
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_establishment_means(params[:establishment_means])
+    end
+    if filter_by_param?(params[:occurrence_status])
+      @occurrence_status = params[:occurrence_status]
+      if @occurrence_status == "absent"
+        @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_occurrence_status_levels_approximating_absent
+      elsif @occurrence_status=="not_absent"
+        @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_occurrence_status_levels_approximating_present
+      end
+    else
+      @occurrence_status = "not_absent"
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_occurrence_status_levels_approximating_present
+    end
+    if with_threatened?
+      @threatened = 't'
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.with_threatened_status
+    elsif without_threatened?
+      @threatened = 'f'
+      @unpaginated_listed_taxa = @unpaginated_listed_taxa.without_threatened_status
+    end
+  end
+
+  def set_options_order
     @find_options[:order] = case params[:order_by]
     when "name"
       order = params[:order]
@@ -426,7 +468,35 @@ module Shared::ListsModule
       "taxon_ancestor_ids || '/' || listed_taxa.taxon_id"
     end
   end
-  
+
+  def filter_by_param?(param_name)
+    !([nil, "on"].include?(param_name))
+  end
+
+  def filter_by_taxon?
+    !!(params[:taxon] && @filter_taxon = (Taxon.find_by_id(params[:taxon].to_i) || Taxon.where("lower(name) = ?", params[:taxon].to_s.downcase).first))
+  end
+
+  def filter_by_iconic_taxon?
+    !!params[:iconic_taxon]
+  end
+
+  def with_threatened?
+    [true, 't', 'true', '1', 'y', 'yes'].include?(params[:threatened])
+  end
+
+  def without_threatened?
+    [false, 'f', 'false', '0', 'n', 'no'].include?(params[:threatened])
+  end
+
+  def with_no_observations?
+    [false, 'f', 'false', '0', 'n', 'no'].include?(params[:observed])
+  end
+
+  def with_observations?
+    [true, 't', 'true', '1', 'y', 'yes'].include?(params[:observed])
+  end
+
   def require_editor
     @list.editable_by?(current_user)
   end
@@ -438,4 +508,16 @@ module Shared::ListsModule
   def load_listed_taxon_photos
     # override
   end
+  
+  def set_taxon_names_by_taxon_id
+    listed_taxa = @listed_taxa.map(&:taxon)
+    taxa = [listed_taxa, @taxa, @iconic_taxa].flatten.compact
+    TaxonName.all(:conditions => [ "taxon_id IN (?)", taxa]).group_by(&:taxon_id)
+  end
 end
+
+
+
+
+
+

@@ -69,6 +69,8 @@ class Observation < ActiveRecord::Base
   CASUAL_GRADE = "casual"
   RESEARCH_GRADE = "research"
   QUALITY_GRADES = [CASUAL_GRADE, RESEARCH_GRADE]
+
+  COMMUNITY_TAXON_SCORE_CUTOFF = (2.0 / 3)
   
   LICENSES = [
     ["CC-BY", :cc_by_name, :cc_by_description],
@@ -189,9 +191,12 @@ class Observation < ActiveRecord::Base
     form
   ).map{|r| "taxon_#{r}_name"}.compact
   ALL_EXPORT_COLUMNS = (CSV_COLUMNS + BASIC_COLUMNS + GEO_COLUMNS + TAXON_COLUMNS + EXTRA_TAXON_COLUMNS).uniq
+
+  preference :community_taxon, :boolean, :default => nil
   
   belongs_to :user, :counter_cache => true
   belongs_to :taxon
+  belongs_to :community_taxon, :class_name => 'Taxon'
   belongs_to :iconic_taxon, :class_name => 'Taxon', 
                             :foreign_key => 'iconic_taxon_id'
   belongs_to :oauth_application
@@ -316,7 +321,6 @@ class Observation < ActiveRecord::Base
   before_save :strip_species_guess,
               :set_taxon_from_species_guess,
               :set_taxon_from_taxon_name,
-              :set_iconic_taxon,
               :keep_old_taxon_id,
               :set_latlon_from_place_guess,
               :reset_private_coordinates_if_coordinates_changed,
@@ -326,7 +330,10 @@ class Observation < ActiveRecord::Base
               :set_geom_from_latlon,
               :set_license,
               :trim_user_agent,
-              :update_identifications
+              :update_identifications,
+              :set_community_taxon_if_pref_changed,
+              :set_taxon_from_community_taxon,
+              :set_iconic_taxon
   
   before_update :set_quality_grade
                  
@@ -933,13 +940,13 @@ class Observation < ActiveRecord::Base
       self.time_zone = parsed_time_zone.name if observed_on_string_changed?
     elsif (offset = date_string[tz_offset_pattern, 1]) && 
         (n = offset.to_f / 100) && 
-        (key = n.round + (n%n.round)/0.6) && 
+        (key = n == 0 ? 0 : n.floor + (n%n.floor)/0.6) && 
         (parsed_time_zone = ActiveSupport::TimeZone[key])
       date_string = date_string.sub(tz_offset_pattern, '')
       self.time_zone = parsed_time_zone.name if observed_on_string_changed?
     elsif (offset = date_string[tz_js_offset_pattern, 2]) && 
         (n = offset.to_f / 100) && 
-        (key = n.round + (n%n.round)/0.6) && 
+        (key = n == 0 ? 0 : n.floor + (n%n.floor)/0.6) && 
         (parsed_time_zone = ActiveSupport::TimeZone[key])
       date_string = date_string.sub(tz_js_offset_pattern, '')
       date_string = date_string.sub(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+/i, '')
@@ -1293,7 +1300,11 @@ class Observation < ActiveRecord::Base
   end
   
   def community_supported_id?
-    num_identification_agreements.to_i > 0 && num_identification_agreements > num_identification_disagreements
+    if community_taxon_rejected?
+      num_identification_agreements.to_i > 0 && num_identification_agreements > num_identification_disagreements
+    else
+      !community_taxon_id.blank? && taxon_id == community_taxon_id
+    end
   end
   
   def quality_metrics_pass?
@@ -1439,7 +1450,7 @@ class Observation < ActiveRecord::Base
   def obscured_place_guess
     return place_guess if place_guess.blank?
     return nil if lat_lon_in_place_guess?
-    place_guess.sub(/^[\d\-]+\s+/, '')
+    place_guess.sub(/^\d[\d\-A-z]+\s+/, '')
   end
   
   def unobscure_coordinates
@@ -1463,6 +1474,141 @@ class Observation < ActiveRecord::Base
 
   def captive_cultivated
     quality_metrics.any?{|m| m.user_id == user_id && m.metric == QualityMetric::WILD && !m.agree?}
+  end
+
+  ##### Community Taxon #########################################################
+
+  def get_community_taxon(options = {})
+    return unless identifications.current.count > 1
+    node = community_taxon_nodes(options).select{|n| n[:cumulative_count] > 1}.sort_by do |n| 
+      [
+        n[:score].to_f > COMMUNITY_TAXON_SCORE_CUTOFF ? 1 : 0, # only consider taxa with a score above the cutoff
+        0 - (n[:taxon].rank_level || 500) # within that set, sort by rank level, i.e. choose lowest rank
+      ]
+    end.last
+    
+    # # Visualizing this stuff is pretty useful for testing, so please leave this in
+    # puts
+    # width = 15
+    # %w(taxon_id taxon_name cc dc cdc score).each do |c|
+    #   print c.ljust(width)
+    # end
+    # puts
+    # community_taxon_nodes.sort_by{|n| n[:taxon].ancestry || ""}.each do |n|
+    #   print n[:taxon].id.to_s.ljust(width)
+    #   print n[:taxon].name.to_s.ljust(width)
+    #   print n[:cumulative_count].to_s.ljust(width)
+    #   print n[:disagreement_count].to_s.ljust(width)
+    #   print n[:conservative_disagreement_count].to_s.ljust(width)
+    #   print n[:score].to_s.ljust(width)
+    #   puts
+    # end
+
+    return unless node
+    return nil if node[:taxon] == Taxon::LIFE
+    node[:taxon]
+  end
+
+  def community_taxon_nodes(options = {})
+    return @community_taxon_nodes if @community_taxon_nodes && !options[:force]
+    # work on current identifications
+    working_idents = identifications.current.includes(:taxon).sort_by(&:id)
+
+    # load all ancestor taxa implied by identifications
+    ancestor_ids = working_idents.map{|i| i.taxon.ancestor_ids}.flatten.uniq.compact
+    taxon_ids = working_idents.map{|i| [i.taxon_id] + i.taxon.ancestor_ids}.flatten.uniq.compact
+    taxa = Taxon.where("id IN (?)", taxon_ids)
+    taxon_ids_count = taxon_ids.size
+
+    @community_taxon_nodes = taxa.map do |id_taxon|
+      # count all identifications of this taxon and its descendants
+      cumulative_count = working_idents.select{|i| i.taxon.self_and_ancestor_ids.include?(id_taxon.id)}.size
+
+      # count identifications of taxa that are outside of this taxon's subtree
+      # (i.e. absolute disagreements)
+      disagreement_count = working_idents.reject{|i|
+       id_taxon.self_and_ancestor_ids.include?(i.taxon_id) || i.taxon.self_and_ancestor_ids.include?(id_taxon.id)
+      }.size
+
+      # count identifications of taxa that are ancestors of this taxon but
+      # were made after the first identification of this taxon (i.e.
+      # conservative disagreements). Note that for genus1 > species1, an
+      # identification of species1 implies an identification of genus1
+      first_ident = working_idents.detect{|i| i.taxon.self_and_ancestor_ids.include?(id_taxon.id)}
+      conservative_disagreement_count = if first_ident
+        working_idents.select{|i| i.id > first_ident.id && id_taxon.ancestor_ids.include?(i.taxon_id)}.size
+      else
+        0
+      end
+
+      {
+        :taxon => id_taxon,
+        :ident_count => working_idents.select{|i| i.taxon_id == id_taxon.id}.size,
+        :cumulative_count => cumulative_count,
+        :disagreement_count => disagreement_count,
+        :conservative_disagreement_count => conservative_disagreement_count,
+        :score => cumulative_count.to_f / (cumulative_count + disagreement_count + conservative_disagreement_count)
+      }
+    end
+  end
+
+  def set_community_taxon(options = {})
+    self.community_taxon = get_community_taxon(options)
+    true
+  end
+
+  def set_community_taxon_if_pref_changed
+    set_community_taxon if prefers_community_taxon_changed?
+    true
+  end
+
+  def self.set_community_taxa(options = {})
+    scope = Observation.includes({:identifications => [:taxon]}, :user).scoped
+    scope = scope.where(options[:where]) if options[:where]
+    scope = scope.by(options[:user]) unless options[:user].blank?
+    scope = scope.of(options[:taxon]) unless options[:taxon].blank?
+    scope = scope.in_place(options[:place]) unless options[:place].blank?
+    scope = scope.in_projects([options[:project]]) unless options[:project].blank?
+    ThinkingSphinx.deltas_enabled = false
+    start_time = Time.now
+    logger = options[:logger] || Rails.logger
+    logger.info "[INFO #{Time.now}] Starting Observation.set_community_taxon, options: #{options.inspect}"
+    scope.find_each do |o|
+      next unless o.identifications.size > 1
+      o.set_community_taxon
+      unless o.save
+        logger.error "[ERROR #{Time.now}] Failed to set community taxon for #{o}: #{o.errors.full_messages.to_sentence}"
+      end
+    end
+    logger.info "[INFO #{Time.now}] Finished Observation.set_community_taxon in #{Time.now - start_time}s, options: #{options.inspect}"
+    ThinkingSphinx.deltas_enabled = true
+  end
+
+  def community_taxon_rejected?
+    return false if prefers_community_taxon == true
+    (prefers_community_taxon == false || user.prefers_community_taxa == false)
+  end
+
+  def set_taxon_from_community_taxon
+    # explicitly opted in
+    self.taxon_id = if prefers_community_taxon
+      community_taxon_id || owners_identification.try(:taxon_id)
+    # obs opted out or user opted out
+    elsif prefers_community_taxon == false || !user.prefers_community_taxa?
+      owners_identification.try(:taxon_id)
+    # implicitly opted in
+    else
+      community_taxon_id || owners_identification.try(:taxon_id)
+    end
+    if taxon_id_changed? && (community_taxon_id_changed? || prefers_community_taxon_changed?)
+      update_stats(:skip_save => true)
+      self.species_guess = if taxon
+        taxon.common_name.try(:name) || taxon.name
+      else
+        nil
+      end
+    end
+    true
   end
   
   def self.obscure_coordinates_for_observations_of(taxon, options = {})
@@ -1577,9 +1723,9 @@ class Observation < ActiveRecord::Base
   end
   
   def set_taxon_from_taxon_name
-    return true if @taxon_name.blank?
+    return true if self.taxon_name.blank?
     return true if taxon_id
-    self.taxon_id = single_taxon_id_for_name(@taxon_name)
+    self.taxon_id = single_taxon_id_for_name(self.taxon_name)
     true
   end
   
@@ -1790,8 +1936,14 @@ class Observation < ActiveRecord::Base
       num_agreements    = 0
       num_disagreements = 0
     else
-      num_agreements    = idents.select{|ident| ident.current? && ident.is_agreement?(:observation => self)}.size
-      num_disagreements = idents.select{|ident| ident.current? && ident.is_disagreement?(:observation => self)}.size
+      if node = community_taxon_nodes.detect{|n| n[:taxon].try(:id) == taxon_id}
+        num_agreements = node[:cumulative_count]
+        num_disagreements = node[:disagreement_count] + node[:conservative_disagreement_count]
+        num_agreements -= 1 if idents.detect{|i| i.taxon_id == taxon_id && i.user_id == user_id}
+      else
+        num_agreements    = idents.select{|ident| ident.current? && ident.is_agreement?(:observation => self)}.size
+        num_disagreements = idents.select{|ident| ident.current? && ident.is_disagreement?(:observation => self)}.size
+      end
     end
     
     # Kinda lame, but Observation#get_quality_grade relies on these numbers
@@ -1807,9 +1959,12 @@ class Observation < ActiveRecord::Base
         quality_grade_changed? || 
         identifications_count_changed?)
       Observation.update_all(
-        ["num_identification_agreements = ?, num_identification_disagreements = ?, quality_grade = ?, identifications_count = ?", 
-          num_agreements, num_disagreements, new_quality_grade, identifications_count], 
-        "id = #{id}")
+        [
+          "num_identification_agreements = ?, num_identification_disagreements = ?, quality_grade = ?, identifications_count = ?", 
+          num_agreements, num_disagreements, new_quality_grade, identifications_count
+        ], 
+        "id = #{id}"
+      )
       refresh_check_lists
     end
   end
@@ -1818,11 +1973,16 @@ class Observation < ActiveRecord::Base
     taxon = Taxon.find_by_id(taxon) unless taxon.is_a?(Taxon)
     return unless taxon
     Rails.logger.info "[INFO #{Time.now}] Observation.update_stats_for_observations_of(#{taxon})"
-    conditions = taxon.descendant_conditions
-    conditions[0] = "#{conditions[0]} OR observations.taxon_id = ?"
-    conditions << taxon.id
-    Observation.do_in_batches(:include => :taxon, :conditions => conditions) do |o|
-      o.update_stats
+    Observation.includes(:taxon, :identifications).
+        select("observations.*").
+        joins("LEFT OUTER JOIN taxa otaxa ON otaxa.id = observations.taxon_id").
+        joins("LEFT OUTER JOIN identifications idents ON idents.observation_id = observations.id").
+        joins("LEFT OUTER JOIN taxa itaxa ON itaxa.id = idents.taxon_id").
+        where("(otaxa.id = ? OR otaxa.ancestry = ? OR otaxa.ancestry LIKE ?) OR (itaxa.id = ? OR itaxa.ancestry = ? OR itaxa.ancestry LIKE ?)", 
+          taxon.id, taxon.ancestry, "#{taxon.ancestry}/%", taxon.id, taxon.ancestry, "#{taxon.ancestry}/%").find_each do |o|
+      o.set_community_taxon
+      o.update_stats(:skip_save => true)
+      o.save
     end
     Rails.logger.info "[INFO #{Time.now}] Finished Observation.update_stats_for_observations_of(#{taxon})"
   end
@@ -1966,7 +2126,10 @@ class Observation < ActiveRecord::Base
   
   def owners_identification
     if identifications.loaded?
-      identifications.detect {|ident| ident.user_id == user_id && ident.current?}
+      # if idents are loaded, the most recent current identification might be a new record
+      identifications.sort_by{|i| i.created_at || 1.minute.from_now}.select {|ident| 
+        ident.user_id == user_id && ident.current?
+      }.last
     else
       identifications.current.by(user_id).last
     end
@@ -2010,10 +2173,12 @@ class Observation < ActiveRecord::Base
     mutable_columns.each do |column|
       self.send("#{column}=", reject.send(column)) if send(column).blank?
     end
+    reject.identifications.update_all("current = false")
     merge_has_many_associations(reject)
     reject.destroy
     identifications.group_by{|ident| [ident.user_id, ident.taxon_id]}.each do |pair, idents|
-      idents.sort_by(&:id).last.update_other_identifications
+      c = idents.sort_by(&:id).last
+      c.update_attributes(:current => true)
     end
     save!
   end

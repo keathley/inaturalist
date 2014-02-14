@@ -1,5 +1,5 @@
 <%-
-  listed_taxon ||= establishment_field || @listed_taxon
+  listed_taxon ||= establishment_field || @primary_listed_taxon || @listed_taxon
   list ||= listed_taxon.list || @list
 -%>
 <div class="establishmentfield">
@@ -23,6 +23,7 @@
         :style => "display: none"} do |f| %>
       <%= f.select :establishment_means, ListedTaxon::ESTABLISHMENT_MEANS.map{|e| [t("establishment.#{e}", :default => e), e]}, :include_blank => t(:unknown) %>
       <span class="establishment_tip_target description helptip" rel="#establishment_tip"></span>
+      <%= f.hidden_field :occurrence_status_level %>
       <%= f.submit t(:save), :class => "default button" %>
       <%= link_to_function t(:cancel), "$(this).parents('.establishment').show(); $(this).parents('.establishmentfield').find('form').hide()",
         :class => "minor button" %>

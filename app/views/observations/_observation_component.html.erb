@@ -38,8 +38,10 @@ Some notes:
   css_class += ' longdesc' if !observation.description.blank? && observation.description.size > 200
   if observation.quality_grade == Observation::RESEARCH_GRADE
     css_class += ' research_grade'
-  elsif observation.id_please
+  end
+  if observation.id_please
     css_class += ' id_please'
+    css_class += ' idandrg' if observation.research_grade?
   end
 -%>
 <div id="observation-<%= observation.id rescue rand(999) %>" class="<%= css_class %>" 
@@ -101,22 +103,21 @@ Some notes:
   </div>
   <div class="readable species_guess attribute">
     <h4 class="label"><%=t :what %></h4>
-    <% if observation.taxon %>
-      <% if observation.species_guess.blank? || observation.taxon.default_name.name.downcase.strip == observation.species_guess.downcase.strip -%>
-        <%= render :partial => 'shared/taxon', 
-                   :locals => {
-                     :taxon => observation.taxon,
-                     :link_url => url_for(observation),
-                     :include_parens => false} %>
-      <% elsif observation.species_guess.downcase.strip == observation.taxon.name.downcase.strip %>
-        <%= render :partial => 'shared/taxon', 
-                   :locals => {
-                     :taxon => observation.taxon,
-                     :link_url => url_for(observation),
-                     :no_common => true} %>
-      <% else %>
-        <%= link_to observation.species_guess, observation %>
-      <% end -%>
+    <% if observation.taxon && observation.taxon_id == observation.community_taxon_id %>
+      <%= render :partial => 'shared/taxon', 
+                 :locals => {
+                   :taxon => observation.taxon,
+                   :comname => !observation.species_guess.blank? && observation.species_guess.downcase != observation.taxon.name.downcase ? observation.species_guess : nil,
+                   :link_url => url_for(observation),
+                   :include_parens => false} %>
+    <% elsif observation.taxon %>
+      <%= render :partial => 'shared/taxon', 
+                 :locals => {
+                    :comname => !observation.species_guess.blank? && observation.species_guess.downcase != observation.taxon.name.downcase ? observation.species_guess : nil,
+                    :no_common => !observation.species_guess.blank? && observation.species_guess.downcase == observation.taxon.name.downcase,
+                    :taxon => observation.taxon,
+                    :link_url => url_for(observation),
+                    :include_parens => false} %>
     <% elsif !observation.species_guess.blank? %>
       <span class="taxon">
         <%= link_to observation.species_guess, observation %>
@@ -206,24 +207,25 @@ Some notes:
         <% end -%>
       </ul>
     <% end -%>
-    <%- if observation.id_please? %>
-      <ul>
-        <li class="last">
-          <%= link_to t(:id_please_expandable_html), observation, :class => "id_please_notice",
-            "data-tip" => t(:observation_would_like_some_help, :user => observation.user.login),
-            "data-tip-show-delay" => 1000 %>
-        </li>
+    <%- if observation.id_please? || observation.research_grade? %>
+      <ul class="bubbles">
+        <% if observation.id_please? -%>
+          <li class="last">
+            <%= link_to t(:id_please_expandable_html), observation, :class => "id_please_notice",
+              "data-tip" => t(:observation_would_like_some_help, :user => observation.user.login),
+              "data-tip-show-delay" => 1000 %>
+          </li>
+        <% end -%>
+        <%- if observation.quality_grade == Observation::RESEARCH_GRADE %>
+          <li class="last">
+            <%= link_to t(:research_grade_short_html), observation_url(observation, :anchor => "data_quality_assessment"),
+              :class => "research_grade_notice", 
+              "data-tip" => t(:research_grade_observations_have),
+              "data-tip-show-delay" => 1000 %>
+          </li>
+        <% end -%>
       </ul>
-    <%- elsif observation.quality_grade == Observation::RESEARCH_GRADE %>
-      <ul>
-        <li class="last">
-          <%= link_to t(:research_grade_short_html), observation_url(observation, :anchor => "data_quality_assessment"),
-            :class => "research_grade_notice", 
-            "data-tip" => t(:research_grade_observations_have),
-            "data-tip-show-delay" => 1000 %>
-        </li>
-      </ul>
-    <% end -%>
+    <%- end -%>
     <ul class="editview">
       <% if logged_in? && current_user.id == observation.user_id && !observation.new_record? -%>
         <li class="editlink"><%= link_to t(:edit), edit_observation_path(observation) %></li>

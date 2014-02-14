@@ -104,6 +104,7 @@ class Taxon < ActiveRecord::Base
     'superorder'   => 43,
     'order'        => 40,
     'suborder'     => 37,
+    'infraorder'   => 35,
     'superfamily'  => 33,
     'family'       => 30,
     'subfamily'    => 27,
@@ -363,7 +364,14 @@ class Taxon < ActiveRecord::Base
     update_listed_taxa
     update_life_lists
     update_obs_iconic_taxa
-    if observations_count > 0 && !Delayed::Job.where("handler LIKE '%update_stats_for_observations_of%- #{id}%'").exists?
+    conditions = ["taxa.id = ? OR taxa.ancestry = ? OR taxa.ancestry LIKE ?", id, ancestry, "#{ancestry}/%"]
+    old_conditions = ["taxa.id = ? OR taxa.ancestry = ? OR taxa.ancestry LIKE ?", id, ancestry_was, "#{ancestry_was}/%"]
+    if (Observation.joins(:taxon).where(conditions).exists? || 
+        Observation.joins(:taxon).where(old_conditions).exists? || 
+        Identification.joins(:taxon).where(conditions).exists? || 
+        Identification.joins(:taxon).where(old_conditions).exists?
+        ) && 
+        !Delayed::Job.where("handler LIKE '%update_stats_for_observations_of%- #{id}%'").exists?
       Observation.delay(:priority => INTEGRITY_PRIORITY, :queue => "slow").update_stats_for_observations_of(id)
     end
     true
@@ -721,6 +729,11 @@ class Taxon < ActiveRecord::Base
   def species_or_lower?
     return false if rank_level.blank?
     rank_level <= SPECIES_LEVEL
+  end
+  
+  def infraspecies?
+    return false if rank_level.blank?
+    rank_level < SPECIES_LEVEL
   end
   
   # Updated the "cached" ancestor values in all listed taxa with this taxon
@@ -1180,6 +1193,7 @@ class Taxon < ActiveRecord::Base
 
   def deleteable_by?(user)
     return true if user.is_admin?
+    return false if taxon_changes.exists? || taxon_change_taxa.exists?
     creator_id == user.id
   end
   
