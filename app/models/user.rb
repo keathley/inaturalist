@@ -1,29 +1,29 @@
 class User < ActiveRecord::Base
-  
+
   # If the user has this role, has_role? will always return true
   JEDI_MASTER_ROLE = 'admin'
-  
+
   devise :database_authenticatable, :registerable, :suspendable,
-         :recoverable, :rememberable, :confirmable, :validatable, 
+         :recoverable, :rememberable, :confirmable, :validatable,
          :encryptable, :encryptor => :restful_authentication_sha1
   handle_asynchronously :send_devise_notification
-  
+
   # set user.skip_email_validation = true if you want to, um, skip email validation before creating+saving
   attr_accessor :skip_email_validation
   attr_accessor :skip_registration_email
-  
+
   # licensing extras
   attr_accessor   :make_observation_licenses_same
   attr_accessor   :make_photo_licenses_same
   attr_accessor   :make_sound_licenses_same
-  attr_accessible :make_observation_licenses_same, 
+  attr_accessible :make_observation_licenses_same,
                   :make_photo_licenses_same,
-                  :make_sound_licenses_same, 
-                  :preferred_photo_license, 
+                  :make_sound_licenses_same,
+                  :preferred_photo_license,
                   :preferred_observation_license,
                   :preferred_sound_license
   attr_accessor :html
-  
+
   preference :project_journal_post_email_notification, :boolean, :default => true
   preference :comment_email_notification, :boolean, :default => true
   preference :identification_email_notification, :boolean, :default => true
@@ -42,12 +42,12 @@ class User < ActiveRecord::Base
   preference :automatic_taxonomic_changes, :boolean, :default => true
   preference :observations_view, :string
 
-  
+
   SHARING_PREFERENCES = %w(share_observations_on_facebook share_observations_on_twitter)
-  NOTIFICATION_PREFERENCES = %w(comment_email_notification identification_email_notification 
-    message_email_notification project_invitation_email_notification 
+  NOTIFICATION_PREFERENCES = %w(comment_email_notification identification_email_notification
+    message_email_notification project_invitation_email_notification
     project_journal_post_email_notification)
-  
+
   belongs_to :life_list, :dependent => :destroy
   has_many  :provider_authorizations, :dependent => :delete_all
   has_one  :flickr_identity, :dependent => :delete
@@ -55,17 +55,17 @@ class User < ActiveRecord::Base
   has_one  :soundcloud_identity, :dependent => :delete
   has_many :observations, :dependent => :destroy
   has_many :deleted_observations
-  
+
   # Some interesting ways to map self-referential relationships in rails
   has_many :friendships, :dependent => :destroy
   has_many :friends, :through => :friendships
   has_many :stalkerships, :class_name => 'Friendship', :foreign_key => 'friend_id', :dependent => :destroy
   has_many :followers, :through => :stalkerships,  :source => 'user'
-  
+
   has_many :lists, :dependent => :destroy
   has_many :life_lists
   has_many :identifications, :dependent => :destroy
-  has_many :identifications_for_others, :class_name => "Identification", 
+  has_many :identifications_for_others, :class_name => "Identification",
     :include => [:observation],
     :conditions => "identifications.user_id != observations.user_id AND identifications.current = true"
   has_many :photos, :dependent => :destroy
@@ -83,8 +83,8 @@ class User < ActiveRecord::Base
   has_many :messages, :dependent => :destroy
   has_many :delivered_messages, :class_name => "Message", :foreign_key => "from_user_id", :conditions => "messages.from_user_id != messages.user_id"
   has_many :guides, :dependent => :nullify, :inverse_of => :user
-  
-  has_attached_file :icon, 
+
+  has_attached_file :icon,
     :styles => { :medium => "300x300>", :thumb => "48x48#", :mini => "16x16#" },
     :processors => [:deanimator],
     :path => ":rails_root/public/attachments/:class/:attachment/:id-:style.:icon_type_extension",
@@ -93,7 +93,7 @@ class User < ActiveRecord::Base
 
   # Roles
   has_and_belongs_to_many :roles
-  
+
   has_subscribers
   has_many :subscriptions, :dependent => :delete_all
   has_many :updates, :foreign_key => :subscriber_id, :dependent => :delete_all
@@ -102,7 +102,6 @@ class User < ActiveRecord::Base
   before_validation :download_remote_icon, :if => :icon_url_provided?
   before_validation :strip_name, :strip_login
   before_save :whitelist_licenses
-  before_create :set_locale
   after_save :update_observation_licenses
   after_save :update_photo_licenses
   after_save :update_sound_licenses
@@ -112,14 +111,14 @@ class User < ActiveRecord::Base
   after_destroy :create_deleted_user
 
   validates_presence_of :icon_url, :if => :icon_url_provided?, :message => 'is invalid or inaccessible'
-  validates_attachment_content_type :icon, :content_type => [/jpe?g/i, /png/i, /gif/i], 
+  validates_attachment_content_type :icon, :content_type => [/jpe?g/i, /png/i, /gif/i],
     :message => "must be JPG, PNG, or GIF"
 
   validates_presence_of     :login
-  
+
   MIN_LOGIN_SIZE = 3
   MAX_LOGIN_SIZE = 40
-  
+
   # Regexes from restful_authentication
   login_regex       = /\A[A-z][\w\-_]+\z/                          # ASCII, strict
   bad_login_message = "use only letters, numbers, and -_ please.".freeze
@@ -128,7 +127,7 @@ class User < ActiveRecord::Base
   domain_tld_regex  = '(?:[A-Z]{2}|com|org|net|edu|gov|mil|biz|info|mobi|name|aero|jobs|museum)'.freeze
   email_regex       = /\A#{email_name_regex}@#{domain_head_regex}#{domain_tld_regex}\z/i
   bad_email_message = "should look like an email address.".freeze
-  
+
   validates_length_of       :login,    :within => MIN_LOGIN_SIZE..MAX_LOGIN_SIZE
   validates_uniqueness_of   :login
   validates_format_of       :login,    :with => login_regex, :message => bad_login_message
@@ -142,7 +141,7 @@ class User < ActiveRecord::Base
   # prevents a user from submitting a crafted form that bypasses activation
   # anything else you want your user to change should be added here.
   attr_accessible :login, :email, :name, :password, :password_confirmation, :icon, :description, :time_zone, :icon_url, :locale
-  
+
   scope :order_by, Proc.new { |sort_by, sort_dir|
     sort_dir ||= 'DESC'
     order("? ?", sort_by, sort_dir)
@@ -158,7 +157,7 @@ class User < ActiveRecord::Base
   def email_required?
     !(skip_email_validation || provider_authorizations.count > 0)
   end
-  
+
   def icon_url_provided?
     !self.icon.present? && !self.icon_url.blank?
   end
@@ -167,12 +166,12 @@ class User < ActiveRecord::Base
     return nil if icon.blank?
     "#{FakeView.root_url}#{icon.url(:thumb)}".gsub(/([^\:])\/\//, '\\1/')
   end
-  
+
   def medium_user_icon_url
     return nil if icon.blank?
     "#{FakeView.root_url}#{icon.url(:medium)}".gsub(/([^\:])\/\//, '\\1/')
   end
-  
+
   def original_user_icon_url
     return nil if icon.blank?
     "#{FakeView.root_url}#{icon.url}".gsub(/([^\:])\/\//, '\\1/')
@@ -212,32 +211,32 @@ class User < ActiveRecord::Base
     self.login = login.strip
     true
   end
-  
+
   def whitelist_licenses
     unless preferred_observation_license.blank? || Observation::LICENSE_CODES.include?(preferred_observation_license)
       self.preferred_observation_license = nil
     end
-    
+
     unless preferred_photo_license.blank? || Observation::LICENSE_CODES.include?(preferred_photo_license)
       self.preferred_photo_license = nil
     end
     true
   end
 
-  # add a provider_authorization to this user.  
+  # add a provider_authorization to this user.
   # auth_info is the omniauth info from rack.
   def add_provider_auth(auth_info)
     provider_auth_info = {
-      :provider_name => auth_info['provider'], 
+      :provider_name => auth_info['provider'],
       :provider_uid => auth_info['uid']
     }
     unless auth_info["credentials"].blank? # open_id (google, yahoo, etc) doesn't provide a token
       provider_auth_info.merge!(
         :token => auth_info["credentials"]["token"],
         :secret => auth_info["credentials"]["secret"]
-      ) 
+      )
     end
-    pa = self.provider_authorizations.build(provider_auth_info) 
+    pa = self.provider_authorizations.build(provider_auth_info)
     pa.auth_info = auth_info
     pa.save
     pa
@@ -248,7 +247,7 @@ class User < ActiveRecord::Base
   # returns either nil or the appropriate ProviderAuthorization
   def has_provider_auth(provider)
     provider = provider.downcase
-    provider_authorizations.detect do |p| 
+    provider_authorizations.detect do |p|
       p.provider_name.match(provider) || p.provider_uid.match(provider)
     end
   end
@@ -260,9 +259,9 @@ class User < ActiveRecord::Base
   def email=(value)
     write_attribute :email, (value ? value.downcase : nil)
   end
-  
+
   # Role related methods
-  
+
   # Checks if a user has a role; returns true if they don't but
   # are admin.  Admins are supreme beings
   def has_role?(role)
@@ -271,13 +270,13 @@ class User < ActiveRecord::Base
   end
 
   # Everything below here was added for iNaturalist
-  
+
   # TODO: named_scope
   def recent_observations(num = 5)
     observations.find(:all, :limit => num, :order => "created_at DESC")
   end
 
-  # TODO: named_scope  
+  # TODO: named_scope
   def friends_observations(limit = 5)
     obs = []
     friends.each do |friend|
@@ -285,26 +284,26 @@ class User < ActiveRecord::Base
     end
     obs.flatten
   end
-  
-  
+
+
   # TODO: named_scope / roles plugin
   def is_curator?
     has_role?(:curator)
   end
-  
+
   def is_admin?
     has_role?(:admin)
   end
   alias :admin? :is_admin?
-  
+
   def to_s
     "<User #{self.id}: #{self.login}>"
   end
-  
+
   def friends_with?(user)
     friends.exists?(user)
   end
-  
+
   def picasa_client
     return nil unless picasa_identity
     @picasa_client ||= Picasa.new(self.picasa_identity.token)
@@ -317,7 +316,7 @@ class User < ActiveRecord::Base
     return nil unless facebook_identity
     @facebook_api ||= Koala::Facebook::API.new(facebook_identity.token)
   end
-  
+
   # returns nil or the facebook ProviderAuthorization
   def facebook_identity
     @facebook_identity ||= has_provider_auth('facebook')
@@ -341,13 +340,13 @@ class User < ActiveRecord::Base
   def twitter_identity
     @twitter_identity ||= has_provider_auth('twitter')
   end
-  
+
   def update_observation_licenses
     return true unless [true, "1", "true"].include?(@make_observation_licenses_same)
     Observation.update_all(["license = ?", preferred_observation_license], ["user_id = ?", id])
     true
   end
-  
+
   def update_photo_licenses
     return true unless [true, "1", "true"].include?(@make_photo_licenses_same)
     number = Photo.license_number_for_code(preferred_photo_license)
@@ -363,7 +362,7 @@ class User < ActiveRecord::Base
     Sound.update_all(["license = ?", number], ["user_id = ?", id])
     true
   end
-  
+
   def merge(reject)
     raise "Can't merge a user with itself" if reject.id == id
     life_list_taxon_ids_to_move = reject.life_list.taxon_ids - life_list.taxon_ids
@@ -377,19 +376,14 @@ class User < ActiveRecord::Base
     LifeList.delay.reload_from_observations(life_list_id)
   end
 
-  def set_locale
-    self.locale ||= I18n.locale
-    true
-  end
-
   def set_uri
     if uri.blank?
       User.update_all(["uri = ?", FakeView.user_url(id)], ["id = ?", id])
     end
     true
   end
-  
-  def self.query(params={}) 
+
+  def self.query(params={})
     scope = self.scoped
     if params[:sort_by] && params[:sort_dir]
       scope.order(params[:sort_by], params[:sort_dir])
@@ -398,12 +392,12 @@ class User < ActiveRecord::Base
     end
     scope
   end
-  
+
   def self.find_for_authentication(conditions = {})
     s = conditions[:email].to_s.downcase
     active.where("lower(login) = ? OR lower(email) = ?", s, s).first
   end
-  
+
   # http://stackoverflow.com/questions/6724494
   def self.authenticate(login, password)
     user = User.find_for_authentication(:email => login)
@@ -456,29 +450,29 @@ class User < ActiveRecord::Base
 
   # given a requested login, will try to find existing users with that login
   # and suggest handle2, handle3, handle4, etc if the login's taken
-  # to prevent namespace clashes (e.g. i register with twitter @joe but 
+  # to prevent namespace clashes (e.g. i register with twitter @joe but
   # there's already an inat user where login=joe, so it suggest joe2)
   def self.suggest_login(requested_login)
     requested_login = requested_login.to_s
     requested_login = "naturalist" if requested_login.blank?
     # strip out everything but letters and numbers so we can pass the login format regex validation
-    requested_login = requested_login.downcase.split('').select do |l| 
+    requested_login = requested_login.downcase.split('').select do |l|
       ('a'..'z').member?(l) || ('0'..'9').member?(l)
     end.join('')
     suggested_login = requested_login
-    
+
     if suggested_login.size > MAX_LOGIN_SIZE
       suggested_login = suggested_login[0..MAX_LOGIN_SIZE/2]
     end
-    
+
     appendix = 1
     while suggested_login.to_s.size < MIN_LOGIN_SIZE || User.find_by_login(suggested_login)
-      appendix += 1 
+      appendix += 1
       suggested_login = "#{requested_login}#{appendix}"
     end
-    
+
     (MIN_LOGIN_SIZE..MAX_LOGIN_SIZE).include?(suggested_login.size) ? suggested_login : nil
-  end  
+  end
 
   # Destroying a user triggers a giant, slow, costly cascade of deletions that
   # all occur within a transaction. This method tries to circumvent some of
@@ -540,7 +534,7 @@ class User < ActiveRecord::Base
 
     end_log_timer
   end
-  
+
   def create_default_life_list
     return true if life_list
     new_life_list = if (existing = self.lists.includes(:rules).where("lists.type = 'LifeList' AND list_rules.id IS NULL").first)
@@ -551,7 +545,7 @@ class User < ActiveRecord::Base
     User.update_all(["life_list_id = ?", new_life_list], ["id = ?", self])
     true
   end
-  
+
   def create_deleted_user
     DeletedUser.create(
       :user_id => id,
