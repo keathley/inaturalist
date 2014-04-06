@@ -108,7 +108,7 @@ function loadingClickForButton(options) {
   options = options || {}
   $(this).data('original-value', $(this).val())
   var txt = $.trim($(this).attr('data-loading-click'))
-  if ($.trim($(this).attr('data-loading-click')) == 'true') { txt = 'Saving...' }
+  if ($.trim($(this).attr('data-loading-click')) == 'true') { txt = I18n.t('saving') }
   $(this).data('original-value', $(this).val())
   $(this).addClass('disabled description').val(txt)
   var link = this
@@ -960,7 +960,11 @@ $.fn.serializeObject = function() {
 }
 
 $.fn.centerDialog = function() {
-  var newHeight = $(':first', this).height() + 100
+  if ($(this).children().length == 1) {
+    var newHeight = $(':first', this).height() + 100
+  } else {
+    var newHeight = $(this).height() + 100
+  }
   var maxHeight = $(window).height() * 0.8
   if (newHeight > maxHeight) { newHeight = maxHeight };
   $(this).dialog('option', 'height', newHeight)
@@ -1073,12 +1077,13 @@ function showJoinProjectDialog(projectId, options) {
       })
       return false
     })
+    $(this).centerDialog()
   })
   dialog.dialog({
     modal: true,
     title: title,
     width: 600,
-    minHeight: 400
+    maxHeight: $(window).height() * 0.8,
   })
 }
 
@@ -1138,8 +1143,9 @@ $.fn.loadObservations = function(options) {
 }
 
 $.fn.observationTaxonStats = function(options) {
-  var url = options.url || '/observations/taxon_stats.json'
-  var container = this
+  var url = options.url || '/observations/taxon_stats.json',
+      container = this,
+      baseSearch = typeof(OBSERVATIONS_URL) == 'undefined' ? window.location.search : '?'+OBSERVATIONS_URL.split('?')[1]
   $.getJSON(url, function(json) {
     $('.species .count', container).html(json.rank_counts.species || 0)
     if (json.species_counts.length > 0) {
@@ -1161,7 +1167,7 @@ $.fn.observationTaxonStats = function(options) {
           taxonTD.append(
             $('<div class="meta"></div>').append(
               $('<a></a>').
-                attr('href', '/observations'+window.location.search+'&taxon_id='+most.taxon.id).
+                attr('href', '/observations'+baseSearch+'&taxon_id='+most.taxon.id).
                 html(most.count),
               ' ',
               I18n.t('observation'+(most.count == 1 ? '' : 's')).toLowerCase()
@@ -1182,8 +1188,9 @@ $.fn.observationTaxonStats = function(options) {
 }
 
 $.fn.observationUserStats = function(options) {
-  var url = options.url || '/observations/taxon_stats.json'
-  var container = this
+  var url = options.url || '/observations/taxon_stats.json',
+      container = this,
+      baseSearch = typeof(OBSERVATIONS_URL) == 'undefined' ? window.location.search : '?'+OBSERVATIONS_URL.split('?')[1]
   $.getJSON(url, function(json) {
     $('.people .count', container).html(json.total || 0)
     if (json.most_observations.length > 0) {
@@ -1197,7 +1204,12 @@ $.fn.observationUserStats = function(options) {
         imageTD.append($('<img/>').attr('src', img_url))
         userTD.html($('<a>'+most.user.login+'</a>').attr('href', '/people/'+most.user.login))
         userTD.append(
-          $('<div></div>').addClass('meta').html(I18n.t('x_observations', {count: most.count}))
+          $('<div></div>').
+            addClass('meta').
+            html(I18n.t('x_observations_link_html', {
+              count: most.count,
+              url: '/observations'+baseSearch+'&user_id='+most.user.login
+            }))
         )
         tr.append(imageTD, userTD)
         $('.most_observations table', container).append(tr)
@@ -1214,7 +1226,12 @@ $.fn.observationUserStats = function(options) {
         imageTD.append($('<img/>').attr('src', img_url))
         userTD.html($('<a>'+row.user.login+'</a>').attr('href', '/people/'+row.user.login))
         userTD.append(
-          $('<div></div>').addClass('meta').html(I18n.t('x_species', {count: row.count}))
+          $('<div></div>').
+            addClass('meta').
+            html(I18n.t('x_species_link_html', {
+              count: row.count, 
+              url: '/observations/taxa'+baseSearch+'&user_id='+row.user.login
+            }))
         )
         tr.append(imageTD, userTD)
         $('.most_species table', container).append(tr)
@@ -1313,3 +1330,10 @@ $.fn.boldId = function() {
     var url = "/identifications/bold.xml?db="+bolddb+"&sequence="+$(this).text()
   })
 }
+
+$(document).ready(function() {
+  // tmp fixes for old views being used with bootstrap
+  $('.bootstrap .button.default').addClass('btn btn-primary').removeClass('button default')
+  $('.bootstrap .inter').addClass('btn btn-link').removeClass('inter')
+  $('.bootstrap .button').addClass('btn').removeClass('button')
+})

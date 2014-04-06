@@ -103,6 +103,8 @@ class List < ActiveRecord::Base
     "refresh_list_#{id}"
   end
   
+  #For lists, returns first_observation (array of [date, observation_id])
+  #where date represents the first date observed (e.g. not first date added to iNat)
   def cache_columns_query_for(lt)
     lt = ListedTaxon.find_by_id(lt) unless lt.is_a?(ListedTaxon)
     return nil unless lt
@@ -110,7 +112,7 @@ class List < ActiveRecord::Base
     sql_key = "EXTRACT(month FROM observed_on) || substr(quality_grade,1,1)"
     <<-SQL
       SELECT
-        min(o.id) AS first_observation_id,
+        min(COALESCE(time_observed_at::varchar, observed_on::varchar, '0') || ',' || o.id::varchar) AS first_observation,
         max(COALESCE(time_observed_at::varchar, observed_on::varchar, '0') || ',' || o.id::varchar) AS last_observation,
         count(*),
         (#{sql_key}) AS key
@@ -143,6 +145,10 @@ class List < ActiveRecord::Base
   
   def refresh_cache_key
     "refresh_list_#{id}"
+  end
+
+  def reload_from_observations_cache_key
+    "rfo_list_#{id}"
   end
   
   def generate_csv(options = {})
@@ -298,7 +304,9 @@ class List < ActiveRecord::Base
     listed_taxa = ListedTaxon.all(:include => [:list],
       :conditions => ["taxon_id IN (?) AND list_id IN (?)", taxon_ids, target_list_ids])
     if respond_to?(:create_new_listed_taxa_for_refresh)
-      create_new_listed_taxa_for_refresh(taxon, listed_taxa, target_list_ids)
+      unless self == ProjectList && observation && observation.quality_grade == 'casual' #only RG for projects
+        create_new_listed_taxa_for_refresh(taxon, listed_taxa, target_list_ids)
+      end
     end
     listed_taxa.each do |lt|
       Rails.logger.info "[INFO #{Time.now}] List.refresh_with_observation, refreshing #{lt}"

@@ -7,9 +7,11 @@ class ObservationPhoto < ActiveRecord::Base
   after_create :set_observation_quality_grade,
                :set_observation_photos_count
   after_destroy :destroy_orphan_photo, :set_observation_quality_grade, :set_observation_photos_count
+
+  include Shared::TouchesObservationModule
   
   def destroy_orphan_photo
-    Photo.delay.destroy_orphans(photo_id)
+    Photo.delay(:priority => INTEGRITY_PRIORITY).destroy_orphans(photo_id)
     true
   end
   
@@ -23,7 +25,7 @@ class ObservationPhoto < ActiveRecord::Base
   def set_observation_photos_count
     return true unless observation_id
     Observation.update_all(
-      ["photos_count = ?", ObservationPhoto.where(:observation_id => observation_id).count], 
+      ["observation_photos_count = ?", ObservationPhoto.where(:observation_id => observation_id).count], 
       ["id = ?", observation_id]
     )
     true

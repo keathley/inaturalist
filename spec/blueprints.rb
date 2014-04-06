@@ -268,6 +268,7 @@ end
 Taxon.blueprint do
   name { Faker::Name.name }
   rank { Taxon::RANKS[rand(Taxon::RANKS.size)] }
+  is_active { true }
 end
 
 Taxon.blueprint(:species) do
@@ -335,6 +336,26 @@ end
 TaxonSwap.blueprint do
   source { Source.make! }
   user { User.make! }
+end
+
+Trip.blueprint do
+  user { User.make! }
+  parent { self.user }
+  title { Faker::Lorem.sentence }
+  body { Faker::Lorem.paragraph }
+  published_at { Time.now }
+  start_time { 8.hours.ago }
+  stop_time { 2.hours.ago }
+end
+
+TripTaxon.blueprint do
+  trip { Trip.make! }
+  taxon { Taxon.make! }
+end
+
+TripPurpose.blueprint do
+  trip { Trip.make! }
+  resource { Taxon.make! }
 end
 
 Update.blueprint do

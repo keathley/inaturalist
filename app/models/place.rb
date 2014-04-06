@@ -10,6 +10,7 @@ class Place < ActiveRecord::Base
   has_many :taxon_links, :dependent => :delete_all
   has_many :guides, :dependent => :nullify
   has_many :projects, :dependent => :nullify, :inverse_of => :place
+  has_many :trips, :dependent => :nullify, :inverse_of => :place
   has_one :place_geometry, :dependent => :destroy
   has_one :place_geometry_without_geom, :class_name => 'PlaceGeometry', 
     :select => (PlaceGeometry.column_names - ['geom']).join(', ')
@@ -315,7 +316,7 @@ class Place < ActiveRecord::Base
       raise e unless e.message =~ /duplicate key/
       return
     end
-    place.parent = options[:parent]
+    place.parent = options[:parent] if options[:parent] && options[:parent].persisted?
     
     unless (options[:ignore_ancestors] || ydn_place.ancestors.blank?)
       ancestors = []

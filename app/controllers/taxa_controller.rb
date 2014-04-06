@@ -98,7 +98,9 @@ class TaxaController < ApplicationController
           :include => :taxon_names, :methods => [:common_name]))
       end
       format.json do
-        @taxa = Taxon::ICONIC_TAXA if params[:q].blank? && params[:taxon_id].blank? && params[:place_id].blank?
+        if params[:q].blank? && params[:taxon_id].blank? && params[:place_id].blank? && params[:names].blank?
+          @taxa = Taxon::ICONIC_TAXA
+        end
         pagination_headers_for @taxa
         options = Taxon.default_json_options
         options[:include].merge!(
@@ -355,10 +357,11 @@ class TaxaController < ApplicationController
       drill_params[:colors] = @color_ids
     end
     
-    per_page = params[:per_page] ? params[:per_page].to_i : 24
-    per_page = 100 if per_page > 100
-    
     page = params[:page] ? params[:page].to_i : 1
+    user_per_page = params[:per_page] ? params[:per_page].to_i : 24
+    user_per_page = 100 if user_per_page > 100
+    per_page = page == 1 && user_per_page < 50 ? 50 : user_per_page
+    
     @facets = Taxon.facets(q, :page => page, :per_page => per_page,
       :with => drill_params, 
       :include => [:taxon_names, {:taxon_photos => :photo}, :taxon_descriptions],
@@ -405,6 +408,13 @@ class TaxaController < ApplicationController
         @taxa.unshift exact
       end
     end
+
+    if page == 1 && per_page != user_per_page
+      old_taxa = @taxa
+      @taxa = WillPaginate::Collection.create(1, user_per_page, old_taxa.total_entries) do |pager|
+        pager.replace(old_taxa[0...user_per_page])
+      end
+    end
     
     respond_to do |format|
       format.html do
@@ -417,7 +427,12 @@ class TaxaController < ApplicationController
         end
         
         if params[:partial]
-          render :partial => "taxa/#{params[:partial]}.html.erb", :locals => {
+          partial_path = if params[:partial] == "taxon"
+            "shared/#{params[:partial]}.html.erb"
+          else
+            "taxa/#{params[:partial]}.html.erb"
+          end
+          render :partial => partial_path, :locals => {
             :js_link => params[:js_link]
           }
         else
@@ -432,6 +447,17 @@ class TaxaController < ApplicationController
           :taxon_names => {:only => [:id, :name, :lexicon, :is_valid]}
         )
         options[:methods] += [:common_name, :image_url, :default_name]
+        if params[:partial]
+          partial_path = if params[:partial] == "taxon"
+            "shared/#{params[:partial]}.html.erb"
+          else
+            "taxa/#{params[:partial]}.html.erb"
+          end
+          @taxa.each_with_index do |t,i|
+            @taxa[i].html = render_to_string(:partial => partial_path, :locals => {:taxon => t})
+            options[:methods] << :html
+          end
+        end
         render :json => @taxa.to_json(options)
       end
     end
@@ -636,7 +662,7 @@ class TaxaController < ApplicationController
       per_page = per_page.to_i > 50 ? 50 : per_page.to_i
     end
     observations = if @taxon && params[:q].blank?
-      obs = Obervation.of(@taxon).page(params[:page]).per_page(per_page).includes(:photos).where("photos.id IS NOT NULL AND photos.user_id IS NOT NULL AND photos.license")
+      obs = Observation.of(@taxon).page(params[:page]).per_page(per_page).includes(:photos).where("photos.id IS NOT NULL AND photos.user_id IS NOT NULL AND photos.license")
       if licensed
         obs = obs.where("photos.license IS NOT NULL AND photos.license > ? OR photo.user_id = ?", Photo::COPYRIGHT, current_user)
       end

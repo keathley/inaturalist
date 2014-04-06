@@ -223,7 +223,7 @@ class Taxon < ActiveRecord::Base
     [const_get("IUCN_#{status_name.upcase}"), status_name]
   }]
   IUCN_STATUSES_SELECT = IUCN_STATUS_NAMES.map do |status_name|
-    ["#{status_name.humanize} (#{IUCN_STATUS_CODES[status_name]})", const_get("IUCN_#{status_name.upcase}")]
+    ["#{I18n.t(status_name, :default => status_name).humanize} (#{IUCN_STATUS_CODES[status_name]})", const_get("IUCN_#{status_name.upcase}")]
   end
   IUCN_STATUS_VALUES = Hash[IUCN_STATUS_NAMES.map {|status_name|
     [status_name, const_get("IUCN_#{status_name.upcase}")]
@@ -258,6 +258,7 @@ class Taxon < ActiveRecord::Base
   
   scope :iconic_taxa, where("taxa.is_iconic = true").includes(:taxon_names)
   scope :of_rank, lambda {|rank| where("taxa.rank = ?", rank)}
+  scope :of_rank_equiv, lambda {|rank_level| where("taxa.rank_level = ?", rank_level)}
   scope :is_locked, where(:locked => true)
   scope :containing_lat_lng, lambda {|lat, lng|
     joins(:taxon_ranges).where("ST_Intersects(taxon_ranges.geom, ST_Point(?, ?))", lng, lat)
@@ -338,8 +339,9 @@ class Taxon < ActiveRecord::Base
   scope :threatened_in_place, lambda {|place|
     includes(:conservation_statuses).
     where("conservation_statuses.iucn >= ?", IUCN_NEAR_THREATENED).
-    where("(conservation_statuses.place_id = ? OR conservation_statuses.place_id IS NULL)", place)
+    where("(conservation_statuses.place_id::text IN (#{ListedTaxon.place_ancestor_ids_sql(place.id)}) OR conservation_statuses.place_id IS NULL)")
   }
+  
   scope :from_place, lambda {|place|
     includes(:listed_taxa).where("listed_taxa.place_id = ?", place)
   }
@@ -364,8 +366,8 @@ class Taxon < ActiveRecord::Base
     update_listed_taxa
     update_life_lists
     update_obs_iconic_taxa
-    conditions = ["taxa.id = ? OR taxa.ancestry = ? OR taxa.ancestry LIKE ?", id, ancestry, "#{ancestry}/%"]
-    old_conditions = ["taxa.id = ? OR taxa.ancestry = ? OR taxa.ancestry LIKE ?", id, ancestry_was, "#{ancestry_was}/%"]
+    conditions = ["taxa.id = ? OR taxa.ancestry = ? OR taxa.ancestry LIKE ?", id, "#{ancestry}/#{id}", "#{ancestry}/#{id}/%"]
+    old_conditions = ["taxa.id = ? OR taxa.ancestry = ? OR taxa.ancestry LIKE ?", id, ancestry_was, "#{ancestry_was}/#{id}/%"]
     if (Observation.joins(:taxon).where(conditions).exists? || 
         Observation.joins(:taxon).where(old_conditions).exists? || 
         Identification.joins(:taxon).where(conditions).exists? || 
@@ -576,6 +578,10 @@ class Taxon < ActiveRecord::Base
   #
   def common_name
     TaxonName.choose_common_name(taxon_names)
+  end
+
+  def common_name_string
+    common_name.try(:name)
   end
 
   def name_with_rank
@@ -989,24 +995,22 @@ class Taxon < ActiveRecord::Base
   def threatened_in_place?(place)
     return false if place.blank?
     place_id = place.is_a?(Place) ? place.id : place
+    place = Place.find_by_id(place_id) unless place.is_a?(Place)
     cs = if association(:conservation_statuses).loaded?
-      conservation_statuses.detect{|cs| cs.place_id == place_id}
+      conservation_statuses.detect{|cs| ([nil, place.ancestry.to_s.split("/")].flatten.include? cs.place_id.to_s) && cs.iucn.to_i > IUCN_LEAST_CONCERN}
     else
-      conservation_statuses.where(:place_id => place_id).first
+      conservation_statuses.where("place_id::text IN (#{ListedTaxon.place_ancestor_ids_sql(place_id)}) OR place_id IS NULL").where("iucn > ?", IUCN_LEAST_CONCERN).first
     end
-    if cs
-      cs.iucn.to_i >= IUCN_NEAR_THREATENED
-    else
-      return false
-    end
+    return !cs.nil?
   end
-
+  
   def threatened_status(options = {})
     if place_id = options[:place_id]
+      place = Place.find_by_id(place_id)
       if association(:conservation_statuses).loaded?
-        conservation_statuses.select{|cs| cs.place_id == place_id && cs.iucn.to_i > IUCN_LEAST_CONCERN}.max_by{|cs| cs.iucn.to_i}
+        conservation_statuses.select{|cs| ([nil, place.ancestry.to_s.split("/")].flatten.include? cs.place_id.to_s) && cs.iucn.to_i > IUCN_LEAST_CONCERN}.max_by{|cs| cs.iucn.to_i}
       else
-        conservation_statuses.where(:place_id => place_id).where("iucn > ?", IUCN_LEAST_CONCERN).max_by{|cs| cs.iucn.to_i}
+        conservation_statuses.where("place_id::text IN (#{ListedTaxon.place_ancestor_ids_sql(place_id)}) OR place_id IS NULL").where("iucn > ?", IUCN_LEAST_CONCERN).max_by{|cs| cs.iucn.to_i}
       end
     elsif (lat = options[:latitude]) && (lon = options[:longitude])
       conservation_statuses.for_lat_lon(lat,lon).where("iucn > ?", IUCN_LEAST_CONCERN).max_by{|cs| cs.iucn.to_i}
@@ -1028,16 +1032,16 @@ class Taxon < ActiveRecord::Base
 
   def geoprivacy(options = {})
     global_status = ConservationStatus.where("place_id IS NULL AND taxon_id IN (?)", self_and_ancestor_ids).order("iucn ASC").last
-    if global_status && [Observation::OBSCURED, Observation::PRIVATE].include?(global_status.geoprivacy)
+    if global_status && global_status.geoprivacy == Observation::PRIVATE
       return global_status.geoprivacy
     end
-    return nil if (options[:latitude].blank? || options[:longitude].blank?)
-    place_status = ConservationStatus.
+    geoprivacies = [global_status.try(:geoprivacy)].compact
+    geoprivacies += ConservationStatus.
       where("taxon_id IN (?)", self_and_ancestor_ids).
-      for_lat_lon(options[:latitude], options[:longitude]).
-      order("iucn ASC").last
-    return place_status.geoprivacy if place_status
-    return global_status.geoprivacy unless global_status.blank?
+      for_lat_lon(options[:latitude], options[:longitude]).pluck(:geoprivacy)
+    return geoprivacies.first if geoprivacies.size == 1
+    return Observation::PRIVATE if geoprivacies.include?(Observation::PRIVATE)
+    return Observation::OBSCURED unless geoprivacies.blank?
     return Observation::OBSCURED if conservation_status.to_i >= IUCN_NEAR_THREATENED
     ancestors.where("conservation_status >= ?", IUCN_NEAR_THREATENED).exists? ? Observation::OBSCURED : nil
   end
@@ -1196,8 +1200,19 @@ class Taxon < ActiveRecord::Base
     return false if taxon_changes.exists? || taxon_change_taxa.exists?
     creator_id == user.id
   end
+
+  def match_descendants(taxon_hash)
+    Taxon.match_descendants_of_id(id, taxon_hash)
+  end
   
   # Static ##################################################################
+
+  def self.match_descendants_of_id(id, taxon_hash)
+    taxon_hash['ancestry'].each{|ancestor|
+      return true if id == ancestor.to_i 
+    }
+    false
+  end
 
   def self.import_or_create(name, options = {})
     taxon = import(name, options)
@@ -1260,7 +1275,7 @@ class Taxon < ActiveRecord::Base
         name
       else
         name = tag.strip.gsub(/ sp\.?$/, '')
-        next if PROBLEM_NAMES.include?(name)
+        next if PROBLEM_NAMES.include?(name.downcase)
         name
       end
     end.compact

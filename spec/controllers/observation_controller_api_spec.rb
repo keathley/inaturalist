@@ -58,6 +58,22 @@ shared_examples_for "an ObservationsController" do
         post :create, :format => :json, :observation => {:species_guess => "."}
       }.should_not raise_error
     end
+
+    describe "project_id" do
+      let(:p) { Project.make! }
+
+      it "should add to project" do
+        post :create, :format => :json, :observation => {:species_guess => "foo"}, :project_id => p.id
+        p.observations.count.should eq 1
+      end
+
+      it "should create a project user if one doesn't exist" do
+        p.project_users.where(:user_id => user.id).should be_blank
+        post :create, :format => :json, :observation => {:species_guess => "foo"}, :project_id => p.id
+        p.reload
+        p.project_users.where(:user_id => user.id).should_not be_blank
+      end
+    end
   end
 
   describe "destroy" do
@@ -271,6 +287,16 @@ shared_examples_for "an ObservationsController" do
       json.size.should eq(3)
     end
 
+    it "should allow filtering by updated_since" do
+      oldo = Observation.make!(:created_at => 1.day.ago, :updated_at => 1.day.ago, :user => user)
+      oldo.updated_at.should be < 1.minute.ago
+      newo = Observation.make!(:user => user)
+      get :by_login, :format => :json, :login => user.login, :updated_since => (newo.updated_at - 1.minute).iso8601
+      json = JSON.parse(response.body)
+      json.detect{|o| o['id'] == newo.id}.should_not be_blank
+      json.detect{|o| o['id'] == oldo.id}.should be_blank
+    end
+
     it "should include deleted observation IDs when filtering by updated_since" do
       oldo = Observation.make!(:created_at => 1.day.ago, :updated_at => 1.day.ago)
       oldo.updated_at.should be < 1.minute.ago
@@ -327,6 +353,15 @@ shared_examples_for "an ObservationsController" do
       json.detect{|obs| obs['id'] == o.id}.should_not be_blank
     end
 
+    it "should filter by time range" do
+      o1 = Observation.make!(:observed_on_string => "2014-03-28T18:57:41+00:00")
+      o2 = Observation.make!(:observed_on_string => "2014-03-28T08:57:41+00:00")
+      get :index, :format => :json, :d1 => "2014-03-28T12:57:41+00:00", :d2 => "2014-03-28T22:57:41+00:00"
+      json = JSON.parse(response.body)
+      json.detect{|obs| obs['id'] == o1.id}.should_not be_blank
+      json.detect{|obs| obs['id'] == o2.id}.should be_blank
+    end
+
     it "should filter by month range" do
       o1 = Observation.make!(:observed_on_string => "2012-01-01 13:13")
       o2 = Observation.make!(:observed_on_string => "2010-03-01 13:13")
@@ -343,6 +378,13 @@ shared_examples_for "an ObservationsController" do
       json = JSON.parse(response.body)
       json.detect{|obs| obs['id'] == wild.id}.should be_blank
       json.detect{|obs| obs['id'] == captive.id}.should_not be_blank
+    end
+
+    it "captive filter=false should include nil" do
+      o = Observation.make!
+      get :index, :format => :json, :captive => false
+      json = JSON.parse(response.body)
+      json.detect{|obs| obs['id'] == o.id}.should_not be_blank
     end
 
     it "should include pagination data in headers" do
@@ -447,14 +489,20 @@ shared_examples_for "an ObservationsController" do
       obs['observation_photos'].should_not be_nil
     end
 
-    it "should allow filtering by updated_since" do
-      oldo = Observation.make!(:created_at => 1.day.ago, :updated_at => 1.day.ago, :user => user)
-      oldo.updated_at.should be < 1.minute.ago
-      newo = Observation.make!(:user => user)
-      get :by_login, :format => :json, :login => user.login, :updated_since => (newo.updated_at - 1.minute).iso8601
-      json = JSON.parse(response.body)
-      json.detect{|o| o['id'] == newo.id}.should_not be_blank
-      json.detect{|o| o['id'] == oldo.id}.should be_blank
+    it "should filter by list_id" do
+      l = List.make!
+      lt = ListedTaxon.make!(:list => l)
+      on_list_obs = Observation.make!(:observed_on_string => "2013-01-03", :taxon => lt.taxon)
+      off_list_obs = Observation.make!(:observed_on_string => "2013-01-03", :taxon => Taxon.make!)
+      get :index, :format => :json, :on => on_list_obs.observed_on_string, :list_id => l.id
+      json_obs = JSON.parse(response.body)
+      json_obs.detect{|o| o['id'] == on_list_obs.id}.should_not be_blank
+      json_obs.detect{|o| o['id'] == off_list_obs.id}.should be_blank
+    end
+
+    it "should not require sign in for page 100 or more" do
+      get :index, :format => :json, :page => 101
+      response.should be_success
     end
   end
 
@@ -577,4 +625,15 @@ describe ObservationsController, "devise authentication" do
     http_login(user)
   end
   it_behaves_like "an ObservationsController"
+end
+
+describe ObservationsController, "without authentication" do
+  describe "index" do
+    it "should require sign in for page 100 or more" do
+      get :index, :format => :json, :page => 10
+      response.should be_success
+      get :index, :format => :json, :page => 101
+      response.status.should eq 401
+    end
+  end
 end

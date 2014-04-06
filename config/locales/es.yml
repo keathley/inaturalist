@@ -59,7 +59,15 @@ es:
   activate_user: "Activar usuario"
   active: activa
   activerecord: 
-    attributes: 
+    attributes:
+      conservation_status:
+        status: Estatus
+        description : Descripción
+        authority: Autoridad
+        place_id: Lugar
+        url: URL
+        geoprivacy: Geoprivacidad
+        iucn: Equivalente a IUCN
       flag: 
         flag: Marca
         reason: Razón
@@ -164,11 +172,13 @@ es:
   add_comma_separated_tags: Agregar etiquetas separadas por comas
   add_comment: "Agregar un comentario"
   add_common_names_for: "Agregar nombres comunes a taxones existentes"
+  add_conservation_status: Agrega estado de conservación
   add_countries: "Agregar países"
   add_custom_project_fields: "Agregar campos de proyecto personalizados"
   add_description: "Agregar %{description_name}"
   add_edit_more_fields: "Añadir/editar más campos"
   add_from_your_observations: Añade de tus observaciones
+  add_listed_taxa_from_observations: Añade taxa listado de observaciones
   add_higher_level_taxon: "Agregar un taxón de más alto nivel (por ejemplo \"pájaros\")"
   add_id: "Agregar identificador"
   add_it_to_place_raquo: "Agregarla a un lugar &raquo;"
@@ -368,7 +378,7 @@ es:
   are_you_sure: "¿Está seguro?"
   are_you_sure?: "¿Está seguro?"
   are_you_sure_delete_asset: "¿Está seguro que desea eliminar esta posesión?"
-  are_you_sure_delete_obervation_from_project: "¿Está seguro de que desea remover esta observación de %{project}?"
+  are_you_sure_delete_observation_from_project: "¿Está seguro de que desea remover esta observación de %{project}?"
   are_you_sure_delete_post: "¿Está seguro que desea eliminar este ingreso?"
   are_you_sure_delete_taxon_move_associates: "¿Está seguro que desea eliminar %{taxonname} (%{taxonid}) y mover todos sus asociados?"
   are_you_sure_delete_this: "¿Está seguro que desea eliminar esto? Tal vez debería revisar si tiene observaciones o taxones primero."
@@ -494,11 +504,12 @@ es:
   by_you: "De usted"
   by_everyone: De todo
   calendar: Calendario
+  calendars_only_show_x_observations_at_time: "Calendarios sólo muestran %{x} observaciones en un momento"
   can_you_help_your_friends_id_these: "¿Puedes ayudar a identificar estas observaciones?"
   cancel: Cancelar
   cant_flag_an_object_that_doesnt_exist: No puedes ponerle advertencia a un contenido que ya no existe
   cant_merge_a_taxon_with_itself: No puedes combinar ese taxón consigo mismo.
-  captive_cultivated: Cuativerio / cultivada
+  captive_cultivated: cautiverio / cultivada
   card: Tarjeta
   case_plural: ''
   casual: casual
@@ -571,6 +582,7 @@ es:
     a tus fotos. Puedes escoger una licencia diferente o quitarla
     después, pero esta es la mejor licencia para compartir datos con los investigadores.
   checklist: "Lista de comprobación"
+  curated_checklist: Lista Official
   checklist_places: "Lugares con lista de verificación"
   checklist_places_absent: "Lugares con lista de verificación (ausentes)"
   checklist_places_confirmed: "Lugares con lista de verificación (confirmados)"
@@ -637,6 +649,7 @@ es:
   commit: Guardar
   committed: Guardar
   committing: Guardando...
+  community_id: 'Identificación de la <strong>comunidad</strong>: '
   community_supported_id: "¿Identificador reconocido por la Comunidad?"
   compare_with: "Comparar con"
   comparing: comparando
@@ -664,6 +677,14 @@ es:
   connecting_to_facebook: "Conectándose a Facebook..."
   connecting_your_inat_account_to_accounts_other_sites: "Conectar su cuenta de %{site_name} con cuentas en otros sitios le permitirá ingresar a %{site_name} usando sus credenciales de esos sitios."
   conservation_status: "Categoría de riesgo"
+  conservation_status_descriptions:
+    status: Estatus, clasificación, etc. Si existe una abreviatura corta como E o CR, por favor úsela, de lo contrario, usa el estatus completo, ej. En peligro de extinción.
+    description: Descripción muy corta del porque esta en la lista.
+    authority: Es la organizacivn que declara el estatus. Puedes saltarte esta parte si deseas aparecer tu como la autoridad.
+    place: Lugar en el cual el estatus esta restringido.
+    url: URL que describa este estaus.
+    geoprivacy: Geoprivacidad predeterminada para esta especie o grupo.
+    iucn: Código equivalente a la Lista roja de IUCN.
   conservation_summary: "conservación resumen"
   contain_all_descendants?: "¿Esta lista de verificación contiene todos los descendientes de este taxón que se producen aquí?"
   content_types: Tipos de contenido
@@ -699,6 +720,7 @@ es:
   couldnt_log_you_in_x: "No pude autenticarlo a usted como '%{x}'"
   countries: Países
   country_stats: "Estadísticas de país para las observaciones creadas"
+  cover: Portada
   create: Crear
   create_a_guide: "Crear una guía"
   create_a_list: "Crear una lista"
@@ -723,6 +745,8 @@ es:
   curate_taxa: "Curar taxones"
   curate_users: "Curar usuarios"
   curated: curados
+  curated_checklist: Lista Official
+  curated_count: Cuenta Official
   curating: Curando
   curation: Curación
   curator: Curador
@@ -1316,6 +1340,7 @@ es:
   if_your_project_is: Si tu proyecto es acerca de un lugar especifico, añade las coordenadas seleccionando el enlace del mapa o añadelas manualmente.
   if_your_search_comes_up: "Si su búsqueda regresa vacía, debería ver algunas cajas de búsqueda para repetir la búsqueda a través de nuestros proveedores externos de nombres"
   ignore: Ignorar
+  image_must_be_exactly: del proyecto debe ser exactamente de 950px ancho y a lo más de 400px de altura
   import: Importar
   import_all_photos_as_observations: "Importar todas las fotos como observaciones"
   import_as_an_observation: "Importar como una observación"
@@ -1860,7 +1885,7 @@ es:
   observation_rules_description: "Usted puede seleccionar reglas para determinar cuáles observaciones se pueden agregar a este proyecto, como limitar las observaciones a un lugar determinado. Nota&#58; limitar a lugares se basa actualmente en %{site_name} Places y sólo puede limitar las observaciones al rectángulo más pequeño que rodea un lugar."
   observation_was_deleted: La observación fue borrada.
   observation_would_like_some_help: "¡A %{user} le gustaría un poco de ayuda para identificar esto!"
-  observations: observaciones
+  observations: Observaciones
   observations_by: Observaciones hechas por
   observations_by_everyone: "Observaciones de todos"
   observations_by_user: "Observaciones de %{user}"
@@ -1903,6 +1928,7 @@ es:
   observations_week: "Observaciones / Semana"
   observations_widget: Observaciones del widget
   observations_will_revert_to_casual: "Las observaciones volverán al grado \"casual\" si no se cumplen las condiciones anteriores o"
+  observationcounts_refreshed: Condes de observación refrescados 
   observed: "Observado el"
   observed_by: "Observado por"
   observed_in_place?: observaciones en
@@ -2298,7 +2324,10 @@ es:
   red: rojo
   redo_search_in_map_area: "Vuelve a realizar la búsqueda en el área del mapa"
   refresh: Refrescar
+  refresh_listed_taxa: refrescar taxa incluidos
+  refreshing: refrescando
   regenerate_url: "Regenerar URL"
+  reload_and_refresh: Volver a cargar y refrescar lista
   reload_from_observations: "Volver a cargar sus observaciones"
   reload_timed_out: "El tiempo de carga expiró.  Por favor trate de nuevo en un momento."
   remarks_optional: 'Comentarios <span class="small description">(opcionales)</span>'
@@ -2307,6 +2336,7 @@ es:
   remove: Quitar
   remove_boundary: Quitar límites
   remove_from: Quitar de
+  remove_conservation_status: Eliminar estado de conservación
   remove_curator: Quitar curador
   remove_curator_role: "Quitar rol de curador"
   remove_curator_status: "Quitar estatus de curador"
@@ -2686,6 +2716,7 @@ es:
   taxonomic_changes: "Cambios taxonómicos"
   taxonomic_groups: "Grupos Taxonómicos"
   taxonomic_order: "Orden taxonómico"
+  taxonomic_status: Estado de la taxonomía
   taxonomic_tags_for_flickr: "Etiquetas Taxonómicas para Flickr"
   taxonomic_tree_browser: "Explorador del Árbol Taxonómico"
   tell_everyone_a_little_about_you: "Cuénteles a todos un poco sobre usted"
@@ -2799,8 +2830,12 @@ es:
   this_taxon_name_was_originally_imported: "Este nombre de taxón fue importado originalmente de un proveedor externo de nombres"
   this_taxon_was_originally_imported_from: "Este taxón fue importado originalmente de un proveedor externo de nombres"
   this_tool_is_experimental: Esta herramienta esta aún en desarrollo, así que porfavor
+  this_will_add_listed_taxa: Esto agregará taxa incluidos a partir de observaciones. Esto puede tomar un tiempo así que por favor utilice con moderación y en pequeñas listas de comprobación
+  this_will_refresh_listed_taxa: Esto actualizará la taxa incluidos en esta lista. Esto puede tomar un tiempo así que por favor utilice con moderación y en pequeñas listas de comprobación
   this_tool_will_add_tags: "herramienta. Esta herramienta agrega etiquetas a sus fotos de todos los nombres comunes y científicos del taxón que usted observó y los nombres de sus ancestros. Entonces si su observación es de un"
   this_will_re_apply_all_list_rules: "Esto aplicará nuevamente todas las reglas de la lista a los taxones, por ejemplo rechazar taxones que no están dentro del taxón de la lista de vida o dentro del rango seleccionado. No agregará ningún taxón. Esto podría tardar unos minutos."
+  this_will_refresh_without_reload: Esto actualizar las estadísticas de observación inmediatamente. Puede tomar algún tiempo y por favor, utilice con moderación.
+  this_will_reload_and_refresh: Esto agregará taxa incluidos a partir de observaciones y actualizar las estadísticas de observación inmediatamente. Puede tomar algún tiempo y por favor, utilice con moderación.
   this_will_try_to_add_tags_to_your_flickr: "Esto tratará de agregar etiquetas a sus fotos de fotos. ¿Desea continuar?"
   this_will_update_all_last_observations: "Esto actualizará todas las observaciones recientes y agregará nuevos taxones de"
   those_are_the_basics_of: "¡Esas son las bases para agregar observacionesHay muchas otras cosas que puede hacer, como buscar y filtrar sus observaciones o modificarlas como un grupo, pero esto debería ser auto explicativo."
@@ -2857,6 +2892,7 @@ es:
   type_a_name_and_click: Pon el nombre de la especie
   type_a_place_name_and_click_search: Pon el nombre de un lugar
   type_a_taxon_name: Nombre de la especie o grupo
+  type_authority: Pon el nombre de la autoridad...
   type_date_time_or_use_the_calendar: Pon la fecha/hora o usa el calendario
   type_one: Por cada línea pon el nombre de una especie.
   type_place_name: "Digite el nombre del lugar"
@@ -3333,6 +3369,32 @@ es:
             de alguien merecen ser marcados y podrán ser borrados, sin embargo evidencia 
             de contaminación o disturbios pueden ser interesantes y probablemente no 
             sean borrados.
+    observation_fields:
+      about_editing_observation_fields_desc_html: |
+        <p class='ui'>
+          Usted puede editar este campo de observación, porque ha creado o
+          porque eres un curador sitio. Si usted es un curador sitio, por
+          favor, siga estos directrices
+        </p>
+        <ol>
+          <li>No haga cambios de nombres arbitrarios (por ejemplo, cambio de "comer" a la "libación")</li>
+          <li>
+            Tenga en cuenta que los campos de observación se pueden utilizar
+            para las observaciones de cualquier taxón, así que trate de no
+            utilizar la terminología específica del taxón
+          </li>
+          <li>No elimine los campos que la gente está utilizando</li>
+          <li>
+            No traducir nombres de campo existentes en diferentes idiomas.
+            Inglés es la lengua franca de este sitio. Si realmente quieres un
+            campo que encapsula el mismo concepto pero en otro idioma, por
+            favor haga un nuevo campo de observación.
+          </li>
+        </ol>
+      dna_help: |
+        Per habilitar la funcionalitat corresponent codi de barres d'ADN BOLD, assegureu-vos que el seu 
+        nom de camp inclou les paraules "COI", "COX1", "els seus", o "matK" 
+        corresponent al gen aquesta objectius de camp.
     observations:
       copy_tip: "Añadir una nueva observación copiando la fecha de esta observación, el lugar, las fotos y los campos de observación."
       captive_help_html: |
@@ -3502,6 +3564,9 @@ es:
             %{image} lo invita a utilizar este portal de información sobre biodiversidad, 
             en el que podrá compartir lo que observa en la naturaleza, aprender de ella e 
             intercambiar información con otros ciudadanos naturalistas.
+    wiki_pages:
+      form:
+        save_and_edit_to_add_attachments: Guardar y editar para agregar datos adjuntos
   vulnerable: vulnerable
   w00t_no_unfragted_taxa: "¡Hurra¡No hay taxones sin injertar!"
   w_photos_only: "con fotos solamente"
@@ -3597,6 +3662,9 @@ es:
   x_observations_html: 
     one: "<span class='count'>1</span> observación"
     other: "<span class='count'>%{count}</span> observaciones"
+  x_observations_link_html:
+    one: "<a href='%{url}'>1</a> observación"
+    other: "<a href='%{url}'>%{count}</a> observaciones"
   x_people: 
     one: "1 persona"
     other: "%{count} personas"
@@ -3612,6 +3680,9 @@ es:
   x_species_html: 
     one: "<span class='count'>1</span> especie"
     other: "<span class='count'>%{count}</span> especies"
+  x_species_link_html:
+    one: "<a href='%{url}'>1</a> especie"
+    other: "<a href='%{url}'>%{count}</a> especies"
   x_taxa_observed_html:
     one: "<span class='count'>1</span> taxon observado</span>"
     other: "<span class='count'>%{count}</span> taxones observó</span>"
@@ -3639,7 +3710,7 @@ es:
   'yes': Sí
   yes_find_them!: "¡Sí, encuéntrelas!"
   yes_i_want_to_join: "Sí, deseo unirme"
-  yes_license_my_observations_so_scientists_can_use: "¡Sí, hacer una licencia de mis fotos y observaciones para que los científicos puedan usar mis datos!"
+  yes_license_my_observations_so_scientists_can_use: "¡Sí, hacer una licencia de mis fotos, sonidos y observaciones para que los científicos puedan usar mis datos!"
   yes_show_this_in_the_box: "Sí, muestre esto en la caja grande arriba de los taxones"
   yesterday_at: ', ayer a las 4pm'
   you: usted

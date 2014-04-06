@@ -36,7 +36,10 @@ var ObservationFields = {
     var url = $(this).attr('href'),
         dialog = $('<div class="dialog"><span class="loading status">Loading...</span></div>')
     $(document.body).append(dialog)
-      $(dialog).dialog({modal:true, title: I18n.translations[I18n.currentLocale()]['new_observation_field']})
+    $(dialog).dialog({
+      modal:true, 
+      title: I18n.translations[I18n.currentLocale()]['new_observation_field']
+    })
     $(dialog).load(url, "format=js", function() {
       $('form', dialog).submit(function() {
         $.ajax({
@@ -65,7 +68,7 @@ var ObservationFields = {
     $('.observation_field').not('.fieldified').each(function() {
       var lastName = $(this).siblings('.fieldified:last').find('input').attr('name')
       if (lastName) {
-        var matches = lastName.match(/observation_field_values_attributes\]\[(\d+)\]/)
+        var matches = lastName.match(/observation_field_values_attributes\]\[(\d*)\]/)
         if (matches) {
           var index = parseInt(matches[1]) + 1
         } else {
@@ -89,7 +92,7 @@ var ObservationFields = {
       $('input', this).each(function() {
         var newName = $(this).attr('name')
           .replace(
-            /observation_field_values_attributes\]\[(\d+)\]/, 
+            /observation_field_values_attributes\]\[(\d*)\]/, 
             'observation_field_values_attributes]['+index+']')
         $(this).attr('name', newName)
       })
@@ -169,7 +172,7 @@ var ObservationFields = {
       modal: true,
       title: title,
       width: 600,
-      minHeight: 400
+      maxHeight: $(window).height() * 0.8
     })
   }
 }

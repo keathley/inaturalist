@@ -245,8 +245,8 @@ class Observation < ActiveRecord::Base
     # the snappy searches. --KMU 2009-04-4
     # has taxon.self_and_ancestors(:id), :as => :taxon_self_and_ancestors_ids
     
-    has "photos_count > 0", :as => :has_photos, :type => :boolean
-    has "sounds_count > 0", :as => :has_sounds, :type => :boolean
+    has "observation_photos_count > 0", :as => :has_photos, :type => :boolean
+    has "observation_sounds_count > 0", :as => :has_sounds, :type => :boolean
     indexes :quality_grade
     has :created_at, :sortable => true
     has :observed_on, :sortable => true
@@ -263,8 +263,8 @@ class Observation < ActiveRecord::Base
     # http://groups.google.com/group/thinking-sphinx/browse_thread/thread/e8397477b201d1e4
     has :latitude, :as => :fake_latitude
     has :longitude, :as => :fake_longitude
-    has :photos_count
-    has :sounds_count
+    has :observation_photos_count
+    has :observation_sounds_count
     has :num_identification_agreements
     has :num_identification_disagreements
     # END HACK
@@ -448,8 +448,8 @@ class Observation < ActiveRecord::Base
   
   scope :has_geo, where("latitude IS NOT NULL AND longitude IS NOT NULL")
   scope :has_id_please, where("id_please IS TRUE")
-  scope :has_photos, where("photos_count > 0")
-  scope :has_sounds, joins(:sounds).where("sounds.id is not null")
+  scope :has_photos, where("observation_photos_count > 0")
+  scope :has_sounds, where("observation_sounds_count > 0")
   scope :has_quality_grade, lambda {|quality_grade|
     quality_grade = '' unless QUALITY_GRADES.include?(quality_grade)
     where("quality_grade = ?", quality_grade)
@@ -600,9 +600,13 @@ class Observation < ActiveRecord::Base
   }
 
   scope :between_dates, lambda{|d1, d2|
-    d1 = (Time.parse(URI.unescape(d1)) rescue Time.now)
-    d2 = (Time.parse(URI.unescape(d2)) rescue Time.now)
-    where("observed_on BETWEEN ? AND ?", d1, d2)
+    t1 = (Time.parse(URI.unescape(d1)) rescue Time.now)
+    t2 = (Time.parse(URI.unescape(d2)) rescue Time.now)
+    if d1.to_s.index(':')
+      where("time_observed_at BETWEEN ? AND ? OR (time_observed_at IS NULL AND observed_on BETWEEN ? AND ?)", t1, t2, t1.to_date, t2.to_date)
+    else
+      where("observed_on BETWEEN ? AND ?", t1, t2)
+    end
   }
 
   scope :dbsearch, lambda {|*args|
@@ -699,7 +703,7 @@ class Observation < ActiveRecord::Base
     scope = scope.license(params[:license]) unless params[:license].blank?
     scope = scope.photo_license(params[:photo_license]) unless params[:photo_license].blank?
     scope = scope.where(:captive => true) if [true, 'true', 't', 'yes', 'y', 1, '1'].include?(params[:captive])
-    scope = scope.where(:captive => false) if [false, 'false', 'f', 'no', 'n', 0, '0'].include?(params[:captive])
+    scope = scope.where("observations.captive = ? OR observations.captive IS NULL", false) if [false, 'false', 'f', 'no', 'n', 0, '0'].include?(params[:captive])
     unless params[:ofv_params].blank?
       params[:ofv_params].each do |k,v|
         scope = scope.has_observation_field(v[:observation_field], v[:value])
@@ -790,23 +794,33 @@ class Observation < ActiveRecord::Base
 
     rank = params[:rank].to_s.downcase
     if Taxon::VISIBLE_RANKS.include?(rank)
-      scope = scope.includes(:taxon).where("taxa.rank = ?", rank)
+      scope = scope.joins(:taxon).where("taxa.rank = ?", rank)
     end
 
     high_rank = params[:hrank]
     if Taxon::VISIBLE_RANKS.include?(high_rank)
       rank_level = Taxon::RANK_LEVELS[high_rank]
-      scope = scope.includes(:taxon).where("taxa.rank_level <= ?", rank_level)
+      scope = scope.joins(:taxon).where("taxa.rank_level <= ?", rank_level)
     end
 
     low_rank = params[:lrank]
     if Taxon::VISIBLE_RANKS.include?(low_rank)
       rank_level = Taxon::RANK_LEVELS[low_rank]
-      scope = scope.includes(:taxon).where("taxa.rank_level >= ?", rank_level)
+      scope = scope.joins(:taxon).where("taxa.rank_level >= ?", rank_level)
     end
 
     if timestamp = Chronic.parse(params[:updated_since])
       scope = scope.where("observations.updated_at > ?", timestamp)
+    end
+
+    unless params[:q].blank?
+      scope = scope.dbsearch(params[:q])
+    end
+
+    if list = List.find_by_id(params[:list_id])
+      if list.listed_taxa.count <= 2000
+        scope = scope.joins("JOIN listed_taxa ON listed_taxa.list_id = #{list.id}").where("listed_taxa.taxon_id = observations.taxon_id", list)
+      end
     end
     
     # return the scope, we can use this for will_paginate calls like:
@@ -863,7 +877,7 @@ class Observation < ActiveRecord::Base
       [options[:include]].flatten.compact
     end
     options[:methods] ||= []
-    options[:methods] << :time_observed_at_utc
+    options[:methods] += [:created_at_utc, :updated_at_utc, :time_observed_at_utc]
     viewer = options[:viewer]
     viewer_id = viewer.is_a?(User) ? viewer.id : viewer.to_i
     options[:except] ||= []
@@ -1113,8 +1127,12 @@ class Observation < ActiveRecord::Base
       LifeList.delay(:priority => USER_INTEGRITY_PRIORITY).refresh_with_observation(id, :taxon_id => taxon_id, 
         :taxon_id_was => taxon_id_was, :user_id => user_id, :created_at => created_at)
     end
+    
+    #only refresh project lists if the observation quality grade or taxon_id changed
+    project_list_refresh_needed = (taxon_id || taxon_id_was) && (quality_grade_changed? || taxon_id_changed? || observed_on_changed?)
+    return true unless project_list_refresh_needed
     unless Delayed::Job.where("handler LIKE '%ProjectList%refresh_with_observation% #{id}\n%'").exists?
-      ProjectList.delay(:priority => USER_INTEGRITY_PRIORITY).refresh_with_observation(id, :taxon_id => taxon_id, 
+      ProjectList.delay(:priority => USER_INTEGRITY_PRIORITY, :queue => "slow").refresh_with_observation(id, :taxon_id => taxon_id, 
         :taxon_id_was => taxon_id_was, :user_id => user_id, :created_at => created_at)
     end
     
@@ -1800,7 +1818,7 @@ class Observation < ActiveRecord::Base
     if taxon_id_changed? && taxon.blank?
       update_out_of_range
     elsif latitude_changed? || private_latitude_changed? || taxon_id_changed?
-      delay.update_out_of_range
+      delay(:priority => USER_INTEGRITY_PRIORITY).update_out_of_range
     end
     true
   end
@@ -1932,6 +1950,7 @@ class Observation < ActiveRecord::Base
   
   def update_stats(options = {})
     idents = [self.identifications.to_a, options[:include]].flatten.compact.uniq
+    current_idents = idents.select(&:current?)
     if taxon_id.blank?
       num_agreements    = 0
       num_disagreements = 0
@@ -1939,10 +1958,10 @@ class Observation < ActiveRecord::Base
       if node = community_taxon_nodes.detect{|n| n[:taxon].try(:id) == taxon_id}
         num_agreements = node[:cumulative_count]
         num_disagreements = node[:disagreement_count] + node[:conservative_disagreement_count]
-        num_agreements -= 1 if idents.detect{|i| i.taxon_id == taxon_id && i.user_id == user_id}
+        num_agreements -= 1 if current_idents.detect{|i| i.taxon_id == taxon_id && i.user_id == user_id}
       else
-        num_agreements    = idents.select{|ident| ident.current? && ident.is_agreement?(:observation => self)}.size
-        num_disagreements = idents.select{|ident| ident.current? && ident.is_disagreement?(:observation => self)}.size
+        num_agreements    = current_idents.select{|ident| ident.is_agreement?(:observation => self)}.size
+        num_disagreements = current_idents.select{|ident| ident.is_disagreement?(:observation => self)}.size
       end
     end
     
@@ -1972,14 +1991,15 @@ class Observation < ActiveRecord::Base
   def self.update_stats_for_observations_of(taxon)
     taxon = Taxon.find_by_id(taxon) unless taxon.is_a?(Taxon)
     return unless taxon
-    Rails.logger.info "[INFO #{Time.now}] Observation.update_stats_for_observations_of(#{taxon})"
+    descendant_conditions = taxon.descendant_conditions
     Observation.includes(:taxon, :identifications).
         select("observations.*").
         joins("LEFT OUTER JOIN taxa otaxa ON otaxa.id = observations.taxon_id").
         joins("LEFT OUTER JOIN identifications idents ON idents.observation_id = observations.id").
         joins("LEFT OUTER JOIN taxa itaxa ON itaxa.id = idents.taxon_id").
-        where("(otaxa.id = ? OR otaxa.ancestry = ? OR otaxa.ancestry LIKE ?) OR (itaxa.id = ? OR itaxa.ancestry = ? OR itaxa.ancestry LIKE ?)", 
-          taxon.id, taxon.ancestry, "#{taxon.ancestry}/%", taxon.id, taxon.ancestry, "#{taxon.ancestry}/%").find_each do |o|
+        where("otaxa.id = ? OR otaxa.ancestry = ? OR otaxa.ancestry LIKE ? OR itaxa.id = ? OR itaxa.ancestry = ? OR itaxa.ancestry LIKE ?", 
+          taxon.id, descendant_conditions[2], descendant_conditions[1], 
+          taxon.id, descendant_conditions[2], descendant_conditions[1]).find_each do |o|
       o.set_community_taxon
       o.update_stats(:skip_save => true)
       o.save

@@ -71,6 +71,12 @@
 
 <div class="column span-17">
   <%= render :partial => 'lists/tools' %>
+
+  <% if @missing_listings %>
+    <div class="quiet box">
+      <%= render :partial => 'missing_listings', locals: {missing_listings: @missing_listings, list_title: @list_title} %>
+    </div>
+  <% end %>
   
   <% unless @list.is_default? -%>
     <div id="description" class="readable description">
@@ -208,7 +214,8 @@
           <% end -%>
           <%- grouper_name = t(:other_animals) if grouper_name == 'Animals' -%>
           <%- grouper_class = grouper.name rescue 'Unknown' -%>
-          <a class="clear stat <%= grouper_class %><%= ' current' if @filter_taxon && @filter_taxon.id == grouper.id %>" href="<%= url_for_params(:iconic_taxon => grouper.id, :without => [:page, :q]) %>">
+          <% fill_in_params = params[:establishment_means] ? {} : {taxon:"", observed: 'on', threatened: 'on', establishment_means: 'on', occurrence_status: 'not_absent', rank: 'species', taxonomic_status: 'active'} %>
+          <a class="clear stat <%= grouper_class %><%= ' current' if @filter_taxon && @filter_taxon.id == grouper.id %>" href="<%= url_for_params({:iconic_taxon => grouper.id, :without => [:page, :q]}.merge(fill_in_params)) %>">
             <div class="readable title">
               &nbsp;
             </div>
@@ -258,10 +265,6 @@
                 <%= radio_button_tag :threatened, :t, @threatened == 't' %>
                 <%= t(:yes).downcase %>
               <% end -%>
-              <%= label :threatened, :f do %>
-                <%= radio_button_tag :threatened, :f, @threatened == 'f' %>
-                <%= t(:no).downcase %>
-              <% end -%>
               <%= label :threatened, nil do %>
                 <%= radio_button_tag :threatened, nil, @threatened.blank? %>
                 <%= t(:any) %>
@@ -272,15 +275,15 @@
               <br>
               <%= label :establishment_means, :endemic do %>
                 <%= radio_button_tag :establishment_means, :endemic, @establishment_means == 'endemic' %>
-                <%= t(:endemic).downcase %>
+                <%= t('establishment.endemic').downcase %>
               <% end -%>
               <%= label :establishment_means, :native do %>
                 <%= radio_button_tag :establishment_means, :native, @establishment_means == 'native' %>
-                <%= t(:native).downcase %>
+                <%= t('establishment.native').downcase %>
               <% end -%>
               <%= label :establishment_means, :introduced do %>
                 <%= radio_button_tag :establishment_means, :introduced, @establishment_means == 'introduced' %>
-                <%= t(:introduced).downcase %>
+                <%= t('establishment.introduced').downcase %>
               <% end -%>
               <%= label :establishment_means, nil do %>
                 <%= radio_button_tag :establishment_means, nil, @establishment_means.blank?%>
@@ -335,7 +338,7 @@
                 <%= t(:any).downcase %>
               <% end -%>
             </div>
-            <input type="submit" class="default button" value="Filter" />
+            <%= submit_tag t(:filter), :class => 'default button', :data => {:disable_with => t(:processing3p)} %>
           </div>
         </form>
       </div><!-- / innerstats -->
